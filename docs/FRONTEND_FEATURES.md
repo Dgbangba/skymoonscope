@@ -193,7 +193,57 @@ failure graceful-error path.
 
 ---
 
-## 5. WASM section summary panel (issue #408)
+## 6. Voice input for global search (issue #394)
+
+The `Cmd+K` / `Ctrl+K` search overlay supports microphone input via the browser's
+Web Speech API, letting users speak a query instead of typing it.
+
+| File | Role |
+| --- | --- |
+| `lib/useVoiceSearch.ts` | Custom React hook; wraps `SpeechRecognition`, manages session lifecycle |
+| `components/GlobalSearchModal.tsx` | Wires the hook; renders mic button, pulsing indicator, inline error hint |
+| `lib/__tests__/useVoiceSearch.test.js` | State-machine unit tests (no React renderer needed) |
+
+### How it works
+
+`useVoiceSearch({ onTranscript })` returns `{ supported, listening, error, start, stop }`.
+
+- **`supported`** — `false` in environments where `window.SpeechRecognition` and
+  `window.webkitSpeechRecognition` are both absent (Firefox stable, SSR, Node.js).
+  The mic button is hidden entirely in those cases, so the overlay is unaffected.
+- **`listening`** — flips to `true` when a session starts and back to `false` on
+  `onend` or `onerror`.
+- **`error`** — set to the Web Speech API error code (`'not-allowed'`, `'no-speech'`,
+  `'network'`, etc.) on failure. The `'aborted'` code is swallowed because it is
+  fired when the hook calls `abort()` itself and does not represent a user-visible
+  problem. Displays a one-word hint (`Mic blocked`, `No speech`, …) next to the
+  close button.
+
+### UI behaviour
+
+- A **mic button** appears to the left of the close button.
+- Clicking it starts a session; clicking again (or receiving `onend`) stops it.
+- While listening, the static search icon is replaced with a **pulsing cyan mic**
+  and the placeholder changes to `Listening…`.
+- Recognised speech is written into the query field as interim results arrive, so
+  results update in real time as the user speaks.
+- Closing the modal (Escape, backdrop click, close button) calls `stop()`, which
+  aborts any active session before unmounting.
+
+### Graceful degradation
+
+The hook accepts a `recognitionFactory` override (used by tests), and the default
+factory checks `window.SpeechRecognition ?? window.webkitSpeechRecognition` at
+call time — not at module load time — so it works correctly in SSR environments
+where `window` is undefined.
+
+### Testability
+
+Because the hook state-machine is extracted from React (the tests drive it by
+calling `startVoiceSearch` / `stopVoiceSearch` helpers with a mock recognition
+object), the tests run under `node --test` with zero browser or renderer
+dependencies. The mock fires synthetic `onresult`, `onerror`, and `onend` events
+to cover every branch.
 
 After a WASM file is decoded, a collapsible panel appears below each file card
 in the upload list, giving a structured view of the module's binary contents.
