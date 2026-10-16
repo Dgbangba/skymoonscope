@@ -122,6 +122,61 @@ function filterCommands(commands, query, options = {}) {
 }
 
 /**
+ * Maps the internal `group` string on a command to one of the three public
+ * display categories shown in the search results panel.
+ *
+ * - 'pages'     — navigable destinations (Explorer, History, Transactions, Schema)
+ * - 'settings'  — configuration destinations (Settings / Preferences)
+ * - 'functions' — callable contract functions
+ *
+ * Any group that does not match a known bucket falls back to 'pages' so
+ * future additions remain visible without requiring a schema change here.
+ *
+ * @param {string} group
+ * @returns {'pages' | 'settings' | 'functions'}
+ */
+function categoryForGroup(group) {
+  if (group === 'Contract functions') return 'functions';
+  if (group === 'Preferences') return 'settings';
+  return 'pages';
+}
+
+/**
+ * Group a flat ordered list of search results into display categories.
+ *
+ * Results preserve their original sort order within each category. Categories
+ * appear in the fixed display order: pages → functions → settings. Empty
+ * categories are omitted so the UI never renders a header with no rows.
+ *
+ * @param {import('./searchCommands').SearchCommand[]} results
+ * @returns {Array<{ category: 'pages'|'functions'|'settings', label: string, commands: import('./searchCommands').SearchCommand[] }>}
+ */
+function groupResultsByCategory(results) {
+  /** @type {Record<string, string>} map category key → human-readable label */
+  const LABELS = {
+    pages: 'Pages',
+    functions: 'Functions',
+    settings: 'Settings',
+  };
+
+  /** Fixed order categories appear in, regardless of which matched */
+  const CATEGORY_ORDER = /** @type {const} */ (['pages', 'functions', 'settings']);
+
+  /** @type {Record<string, import('./searchCommands').SearchCommand[]>} */
+  const buckets = { pages: [], functions: [], settings: [] };
+
+  const list = Array.isArray(results) ? results : [];
+  for (const command of list) {
+    const cat = categoryForGroup(command.group ?? '');
+    buckets[cat].push(command);
+  }
+
+  return CATEGORY_ORDER
+    .filter((cat) => buckets[cat].length > 0)
+    .map((cat) => ({ category: cat, label: LABELS[cat], commands: buckets[cat] }));
+}
+
+/**
  * Build the searchable command list, optionally extended with contextual
  * entries such as the current contract's functions.
  *
@@ -204,4 +259,6 @@ module.exports = {
   normalizeHighlight,
   optionIdFor,
   SEARCH_OPTION_ID_PREFIX,
+  categoryForGroup,
+  groupResultsByCategory,
 };

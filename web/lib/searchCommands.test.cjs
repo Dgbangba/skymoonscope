@@ -150,3 +150,119 @@ test('moveHighlight: stays at 0 for an empty result list', () => {
   assert.equal(moveHighlight(0, 1, 0), 0);
   assert.equal(moveHighlight(3, -1, 0), 0);
 });
+
+// ── Search result grouping ──────────────────────────────────────────────────
+
+const { categoryForGroup, groupResultsByCategory } = require('./searchCommands');
+
+// categoryForGroup ────────────────────────────────────────────────────────────
+
+test('categoryForGroup: Navigation maps to pages', () => {
+  assert.equal(categoryForGroup('Navigation'), 'pages');
+});
+
+test('categoryForGroup: Preferences maps to settings', () => {
+  assert.equal(categoryForGroup('Preferences'), 'settings');
+});
+
+test('categoryForGroup: Contract functions maps to functions', () => {
+  assert.equal(categoryForGroup('Contract functions'), 'functions');
+});
+
+test('categoryForGroup: unknown group falls back to pages', () => {
+  assert.equal(categoryForGroup('Something Else'), 'pages');
+  assert.equal(categoryForGroup(''), 'pages');
+});
+
+// groupResultsByCategory ──────────────────────────────────────────────────────
+
+const GROUPED_COMMANDS = [
+  { id: 'nav-explorer', title: 'Explorer', group: 'Navigation', href: '/?tab=explorer' },
+  { id: 'nav-history',  title: 'History',  group: 'Navigation', href: '/?tab=history' },
+  { id: 'fn-transfer',  title: 'transfer', group: 'Contract functions', action: 'select-function' },
+  { id: 'nav-settings', title: 'Settings', group: 'Preferences', href: '/settings' },
+];
+
+test('groupResultsByCategory: returns one bucket per present category', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  const cats = groups.map((g) => g.category);
+  assert.deepEqual(cats, ['pages', 'functions', 'settings']);
+});
+
+test('groupResultsByCategory: pages bucket contains Navigation items', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  const pages = groups.find((g) => g.category === 'pages');
+  assert.ok(pages);
+  assert.equal(pages.commands.length, 2);
+  assert.ok(pages.commands.some((c) => c.id === 'nav-explorer'));
+  assert.ok(pages.commands.some((c) => c.id === 'nav-history'));
+});
+
+test('groupResultsByCategory: functions bucket contains contract function items', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  const fns = groups.find((g) => g.category === 'functions');
+  assert.ok(fns);
+  assert.equal(fns.commands.length, 1);
+  assert.equal(fns.commands[0].id, 'fn-transfer');
+});
+
+test('groupResultsByCategory: settings bucket contains Preferences items', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  const settings = groups.find((g) => g.category === 'settings');
+  assert.ok(settings);
+  assert.equal(settings.commands.length, 1);
+  assert.equal(settings.commands[0].id, 'nav-settings');
+});
+
+test('groupResultsByCategory: each bucket has a human-readable label', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  for (const group of groups) {
+    assert.ok(typeof group.label === 'string' && group.label.length > 0,
+      `category "${group.category}" should have a non-empty label`);
+  }
+  assert.equal(groups.find((g) => g.category === 'pages').label, 'Pages');
+  assert.equal(groups.find((g) => g.category === 'functions').label, 'Functions');
+  assert.equal(groups.find((g) => g.category === 'settings').label, 'Settings');
+});
+
+test('groupResultsByCategory: category order is always pages → functions → settings', () => {
+  // Provide items in reverse order to confirm output order is fixed.
+  const reversed = [...GROUPED_COMMANDS].reverse();
+  const cats = groupResultsByCategory(reversed).map((g) => g.category);
+  assert.deepEqual(cats, ['pages', 'functions', 'settings']);
+});
+
+test('groupResultsByCategory: omits empty categories', () => {
+  const onlyFunctions = [
+    { id: 'fn-mint', title: 'mint', group: 'Contract functions', action: 'select-function' },
+  ];
+  const groups = groupResultsByCategory(onlyFunctions);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].category, 'functions');
+});
+
+test('groupResultsByCategory: returns empty array for empty input', () => {
+  assert.deepEqual(groupResultsByCategory([]), []);
+});
+
+test('groupResultsByCategory: tolerates non-array input', () => {
+  assert.deepEqual(groupResultsByCategory(null), []);
+  assert.deepEqual(groupResultsByCategory(undefined), []);
+});
+
+test('groupResultsByCategory: preserves within-category registry order', () => {
+  const groups = groupResultsByCategory(GROUPED_COMMANDS);
+  const pages = groups.find((g) => g.category === 'pages');
+  assert.equal(pages.commands[0].id, 'nav-explorer');
+  assert.equal(pages.commands[1].id, 'nav-history');
+});
+
+test('groupResultsByCategory: works with full buildCommandRegistry output', () => {
+  const registry = buildCommandRegistry({ functions: [{ name: 'transfer' }, { name: 'mint' }] });
+  const groups = groupResultsByCategory(registry);
+  const cats = groups.map((g) => g.category);
+  // All three categories should be present since registry has nav + functions + settings.
+  assert.ok(cats.includes('pages'));
+  assert.ok(cats.includes('functions'));
+  assert.ok(cats.includes('settings'));
+});

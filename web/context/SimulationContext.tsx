@@ -17,6 +17,7 @@ import { DEFAULT_TRANSACTION_FILTER, type TransactionFilter } from '../lib/trans
 import type { GasGolfingSuggestion } from '../lib/gasGolfingSort';
 import type { NavTab } from '../components/HeaderNav';
 import { SEARCH_COMMAND_EVENT } from '../components/GlobalSearchModal';
+import { extractFunctionNamesFromWasm } from '../lib/wasmFunctionExtractor';
 
 const VALID_TABS: NavTab[] = ["explorer", "schema", "history", "transactions", "analytics"];
 
@@ -37,6 +38,14 @@ interface SimulationContextValue {
   setContractId: (id: string) => void;
   selectedFunction: ContractFunction;
   setSelectedFunction: (func: ContractFunction) => void;
+  /**
+   * The live set of contract functions shown in the sidebar and search overlay.
+   *
+   * After a WASM upload this is replaced with the real exports parsed from the
+   * binary. Before any upload (or after a reset) it falls back to the mock
+   * functions so the UI always has something useful to display.
+   */
+  contractFunctions: ContractFunction[];
   currentResult: InvocationResult | null;
   setCurrentResult: (result: InvocationResult | null) => void;
   loading: boolean;
@@ -76,6 +85,13 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   );
   const [selectedFunction, setSelectedFunction] = useState<ContractFunction>(
     MOCK_CONTRACT_FUNCTIONS[0]
+  );
+  // Holds the functions exported by the currently-loaded contract.
+  // Starts as the mock set so the UI is never empty; replaced with real
+  // exports when a WASM file is successfully parsed after upload; reset back
+  // to the mock set when the user clears the upload.
+  const [contractFunctions, setContractFunctions] = useState<ContractFunction[]>(
+    MOCK_CONTRACT_FUNCTIONS
   );
   const [currentResult, setCurrentResult] = useState<InvocationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -143,7 +159,12 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
         | undefined;
       if (detail?.action !== "select-function" || !detail.payload?.name) return;
 
-      const match = MOCK_CONTRACT_FUNCTIONS.find((fn) => fn.name === detail.payload?.name);
+      // Search the live contract functions list (real exports after upload, or
+      // mocks before any upload) rather than the static mock array.
+      const name = detail.payload.name;
+      const match =
+        contractFunctions.find((fn) => fn.name === name) ??
+        MOCK_CONTRACT_FUNCTIONS.find((fn) => fn.name === name);
       if (!match) return;
 
       setSelectedFunction(match);
@@ -153,7 +174,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
 
     window.addEventListener(SEARCH_COMMAND_EVENT, handleCommand);
     return () => window.removeEventListener(SEARCH_COMMAND_EVENT, handleCommand);
-  }, []);
+  }, [contractFunctions]);
 
   const handleSimulate = async (inputs: Record<string, any>, customWasmData?: string) => {
     setLoading(true);
@@ -224,6 +245,10 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     setWasmData(null);
     clearLatestAnalysis();
     setUploadResetKey((k) => k + 1);
+    // Reset to mock functions so the search overlay and sidebar are not empty
+    // after the user clears the current contract upload.
+    setContractFunctions(MOCK_CONTRACT_FUNCTIONS);
+    setSelectedFunction(MOCK_CONTRACT_FUNCTIONS[0]);
   }, []);
 
   const handleWasmReady = async (file: File) => {
@@ -234,6 +259,30 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     try {
       const bytes = await file.arrayBuffer();
       const base64Bytes = arrayBufferToBase64(bytes);
+
+      // ── Extract exported functions from the WASM binary ──────────────────
+      // Parse the binary client-side to discover all public function exports.
+      // This runs synchronously on the already-read ArrayBuffer, so it adds no
+      // extra network round-trip. The result updates the search index and the
+      // function sidebar immediately, before the gas-golfing response arrives.
+      try {
+        const exportedNames = extractFunctionNamesFromWasm(bytes);
+        if (exportedNames.length > 0) {
+          // Convert bare names to the minimal ContractFunction shape the UI
+          // needs. We have no ABI at this point, so inputs/outputs are left
+          // empty; users can still invoke functions via the search overlay.
+          const discovered: ContractFunction[] = exportedNames.map((name) => ({
+            name,
+            inputs: [],
+          }));
+          setContractFunctions(discovered);
+          // Pre-select the first exported function so the form is not blank.
+          setSelectedFunction(discovered[0]);
+        }
+      } catch {
+        // WASM parsing is best-effort: if it fails, keep whatever functions
+        // are currently loaded rather than clearing the list.
+      }
 
       const res = await fetch(apiUrl('/analyze/gas-golfing'), {
         method: 'POST',
@@ -271,6 +320,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
         setContractId,
         selectedFunction,
         setSelectedFunction,
+        contractFunctions,
         currentResult,
         setCurrentResult,
         loading,
