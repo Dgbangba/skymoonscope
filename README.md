@@ -42,6 +42,7 @@ The **core** crate is a Rust binary that will power Sky Moon Scope's resource pr
 - **Gas Golfing Analysis**: Automated detection of gas-heavy patterns with optimization suggestions
 - **Contract Simulation**: Test contract functions with various inputs
 - **Fee Market Analysis**: Real-time fee predictions and market conditions
+- **Soroban Metadata Decoder**: Decodes `contractmetav0` and `contractspecv0` WASM custom sections into structured ABI and build metadata
 
 ### Build & Run
 ```bash
@@ -108,6 +109,7 @@ The **web** app is a Next.js + Tailwind CSS dashboard for exploring resource usa
 - **Global Search (`Cmd+K` / `Ctrl+K`)**: Quick-search overlay for jumping to any panel, page or contract function from anywhere in the app.
 - **Custom Endpoints**: `/settings` stores a self-hosted Soroban RPC and indexer URL in LocalStorage, with a connection test for each.
 - **Off-Thread WASM Decoding**: Uploaded bytecode is decoded and validated in a dedicated Web Worker, so large contracts never freeze the UI.
+- **Soroban Metadata Decoding**: Displays ABI signatures, documentation, parameter types, custom types, and build metadata decoded from `contractspecv0` and `contractmetav0`.
 
 See [docs/FRONTEND_FEATURES.md](docs/FRONTEND_FEATURES.md) for details.
 

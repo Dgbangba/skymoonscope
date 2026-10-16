@@ -31,6 +31,11 @@
  * calls receive a proper error reply rather than the worker dying entirely.
  */
 
+try {
+  importScripts('/wasm/sorobanMeta.js');
+} catch {
+  // Ignore if unavailable
+}
 importScripts('/wasm/wasmValidation.js');
 
 self.onmessage = (event) => {

@@ -490,6 +490,34 @@
     warnings.push('Module has no code section');
   }
 
+  let sorobanMeta = undefined;
+  try {
+    const sorobanMetaApi =
+      typeof require !== 'undefined'
+        ? (function () {
+            try {
+              return require('./sorobanMeta');
+            } catch {
+              return null;
+            }
+          })()
+        : typeof SkyMoonScopeSorobanMeta !== 'undefined'
+        ? SkyMoonScopeSorobanMeta
+        : null;
+    if (sorobanMetaApi && typeof sorobanMetaApi.decodeSorobanMeta === 'function') {
+      const decoded = sorobanMetaApi.decodeSorobanMeta(bytes);
+      if (
+        decoded.contractMeta.length > 0 ||
+        decoded.specFunctions.length > 0 ||
+        decoded.specTypes.length > 0
+      ) {
+        sorobanMeta = decoded;
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+
   return {
     valid: true,
     byteLength: bytes.length,
@@ -498,6 +526,7 @@
     exports,
     imports,
     dataSegments,
+    sorobanMeta,
     errors,
     warnings,
     durationMs: Date.now() - started,
