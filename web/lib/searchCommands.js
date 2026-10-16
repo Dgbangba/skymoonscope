@@ -79,10 +79,95 @@ function isSubsequence(query, text) {
 }
 
 /**
+ * Split a searchable field into useful fuzzy-match candidates.
+ *
+ * Keeping the complete value allows multi-word queries to match, while the
+ * individual tokens make typos in one word (for example "histroy") useful.
+ */
+function fuzzyCandidates(value) {
+  const normalized = normalize(value);
+  if (!normalized) return [];
+
+  const words = normalized.split(/[\s/_-]+/).filter(Boolean);
+  return words.length > 1 ? [normalized, ...words] : [normalized];
+}
+
+/**
+ * Keep fuzzy matching conservative for short queries and progressively allow
+ * more edits as the query gets longer.
+ */
+function fuzzyEditLimit(length) {
+  if (length < 3) return 0;
+  if (length <= 4) return 1;
+  if (length <= 8) return 2;
+  return 3;
+}
+
+/**
+ * Optimal-string-alignment Damerau-Levenshtein distance.
+ *
+ * Unlike a plain subsequence check, this catches substitutions, insertions,
+ * deletions and adjacent transpositions, which are the common search typos we
+ * want Cmd+K to tolerate.
+ */
+function damerauLevenshteinDistance(source, target) {
+  const rows = source.length + 1;
+  const columns = target.length + 1;
+  const matrix = Array.from({ length: rows }, () => Array(columns).fill(0));
+
+  for (let row = 0; row < rows; row += 1) matrix[row][0] = row;
+  for (let column = 0; column < columns; column += 1) matrix[0][column] = column;
+
+  for (let row = 1; row < rows; row += 1) {
+    for (let column = 1; column < columns; column += 1) {
+      const substitutionCost = source[row - 1] === target[column - 1] ? 0 : 1;
+
+      matrix[row][column] = Math.min(
+        matrix[row - 1][column] + 1,
+        matrix[row][column - 1] + 1,
+        matrix[row - 1][column - 1] + substitutionCost,
+      );
+
+      if (
+        row > 1 &&
+        column > 1 &&
+        source[row - 1] === target[column - 2] &&
+        source[row - 2] === target[column - 1]
+      ) {
+        matrix[row][column] = Math.min(
+          matrix[row][column],
+          matrix[row - 2][column - 2] + 1,
+        );
+      }
+    }
+  }
+
+  return matrix[source.length][target.length];
+}
+
+function scoreFuzzyCandidates(query, candidates, baseScore) {
+  const maxEdits = fuzzyEditLimit(query.length);
+  if (maxEdits === 0) return 0;
+
+  let bestScore = 0;
+
+  for (const candidate of candidates) {
+    if (Math.abs(candidate.length - query.length) > maxEdits) continue;
+
+    const distance = damerauLevenshteinDistance(query, candidate);
+    if (distance <= maxEdits) {
+      bestScore = Math.max(bestScore, baseScore - distance * 5);
+    }
+  }
+
+  return bestScore;
+}
+
+/**
  * Score a command against a query. Higher is better; `0` means no match.
  *
- * Ranking, strongest first: exact title, title prefix, word-start inside the
- * title, keyword hit, substring anywhere, then a loose subsequence fallback.
+ * Exact/prefix/substring matches remain strongest. Typo-tolerant matches are
+ * ranked below direct title matches but above the loose subsequence fallback.
  */
 function scoreCommand(command, query) {
   const q = normalize(query);
@@ -99,6 +184,14 @@ function scoreCommand(command, query) {
   if (title.includes(q)) return 60;
   if (subtitle.includes(q)) return 40;
   if (keywords.some((keyword) => keyword.includes(q))) return 30;
+
+  const fuzzyScore = Math.max(
+    scoreFuzzyCandidates(q, fuzzyCandidates(title), 55),
+    scoreFuzzyCandidates(q, keywords.flatMap(fuzzyCandidates), 45),
+    scoreFuzzyCandidates(q, fuzzyCandidates(subtitle), 30),
+  );
+  if (fuzzyScore > 0) return fuzzyScore;
+
   if (isSubsequence(q, title)) return 20;
 
   return 0;
