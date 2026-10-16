@@ -22,6 +22,7 @@ import { useWasmValidationWorker } from "../hooks/useWasmValidationWorker";
 import { extractContractFunctions } from "../lib/wasmValidation";
 import { debugLog } from "../lib/debugUtils";
 import type { WasmValidationReport } from "../lib/wasmValidation";
+import WasmSectionSummaryPanel from "./WasmSectionSummary";
 
 // Utility for cleaner tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -421,8 +422,8 @@ export default function WasmUpload({
 
             {/* File Items */}
             {files.map((wasmFile) => (
+              <React.Fragment key={wasmFile.id}>
               <motion.div
-                key={wasmFile.id}
                 layout
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -512,8 +513,6 @@ export default function WasmUpload({
                         functions &bull; decoded in {wasmFile.validation.durationMs}ms
                       </p>
                     )}
-
-                    {/* error state */}
                     {/* Error State */}
                     {wasmFile.status === "error" && wasmFile.error && (
                       <div className="mt-1.5 flex items-center gap-2">
@@ -553,6 +552,15 @@ export default function WasmUpload({
                   </div>
                 </div>
               </motion.div>
+              {/* Section Summary Panel — shown for successfully decoded files */}
+              {wasmFile.status === "success" && wasmFile.validation && (
+                <WasmSectionSummaryPanel
+                  report={wasmFile.validation}
+                  defaultOpen={false}
+                  className="mt-2"
+                />
+              )}
+              </React.Fragment>
             ))}
 
             {/* Analyze All Button */}

@@ -8,7 +8,6 @@ import { FunctionSidebar } from './FunctionSidebar';
 import { CopyButton } from './CopyButton';
 import { ContractInteraction } from './ContractInteraction';
 import { apiUrl } from '../lib/api';
-import { MOCK_CONTRACT_FUNCTIONS } from '../lib/sorobantypes';
 
 export function SimulationPanelTop() {
   const {
@@ -103,6 +102,7 @@ export function SimulationPanelSidebar() {
     setContractId,
     wasmFile,
     currentResult,
+    contractFunctions,
     selectedFunction,
     setSelectedFunction,
     setCurrentResult,
@@ -188,7 +188,7 @@ export function SimulationPanelSidebar() {
       <WalletBalanceCard />
       
       <FunctionSidebar
-        functions={MOCK_CONTRACT_FUNCTIONS}
+        functions={contractFunctions}
         selectedFunction={selectedFunction}
         onSelect={(func) => {
           setSelectedFunction(func);

@@ -13,6 +13,17 @@ export interface SearchCommand {
   keywords?: string[];
 }
 
+/** One of the three public display categories for grouped search results. */
+export type SearchCategory = 'pages' | 'functions' | 'settings';
+
+/** A category bucket returned by `groupResultsByCategory`. */
+export interface SearchResultGroup {
+  category: SearchCategory;
+  /** Human-readable heading, e.g. "Pages", "Functions", "Settings". */
+  label: string;
+  commands: SearchCommand[];
+}
+
 export declare const BASE_COMMANDS: SearchCommand[];
 
 /** True when the event is Cmd+K / Ctrl+K. */
@@ -54,3 +65,16 @@ export declare function buildCommandRegistry(context?: {
 }): SearchCommand[];
 
 export declare function moveHighlight(current: number, delta: number, length: number): number;
+
+/**
+ * Map an internal `group` string to a `SearchCategory`.
+ * Unknown groups fall back to `'pages'`.
+ */
+export declare function categoryForGroup(group: string): SearchCategory;
+
+/**
+ * Group a flat ordered results array into display categories.
+ * Empty categories are omitted. Categories always appear in the order:
+ * pages → functions → settings.
+ */
+export declare function groupResultsByCategory(results: SearchCommand[]): SearchResultGroup[];

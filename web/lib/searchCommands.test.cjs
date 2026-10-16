@@ -1,5 +1,5 @@
 // searchCommands.test.cjs — unit tests for the Cmd+K global search overlay
-// Closes Issue #623
+// Covers search behavior from Issues #623 and #387
 // Runs with: node --test ./lib/searchCommands.test.cjs
 
 'use strict';
@@ -115,6 +115,39 @@ test('filterCommands: matches a word start inside a multi-word title', () => {
   assert.deepEqual(
     filterCommands(COMMANDS, 'history').map((c) => c.id),
     ['b'],
+  );
+});
+
+test('filterCommands: fuzzy matching tolerates a substituted character in a title', () => {
+  assert.deepEqual(
+    filterCommands(COMMANDS, 'settungs').map((c) => c.id),
+    ['a'],
+  );
+});
+
+test('filterCommands: fuzzy matching handles adjacent transpositions in title words', () => {
+  assert.deepEqual(
+    filterCommands(COMMANDS, 'histroy').map((c) => c.id),
+    ['b'],
+  );
+});
+
+test('filterCommands: fuzzy matching also applies to keywords', () => {
+  assert.deepEqual(
+    filterCommands(COMMANDS, 'indexre').map((c) => c.id),
+    ['a'],
+  );
+});
+
+test('filterCommands: direct matches rank above fuzzy matches', () => {
+  const commands = [
+    { id: 'fuzzy', title: 'Settungs', subtitle: '', group: 'Test', keywords: [] },
+    { id: 'direct', title: 'Settings', subtitle: '', group: 'Test', keywords: [] },
+  ];
+
+  assert.deepEqual(
+    filterCommands(commands, 'settings').map((c) => c.id),
+    ['direct', 'fuzzy'],
   );
 });
 

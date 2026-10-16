@@ -254,6 +254,7 @@ fn map_guard_err(err: GuardError) -> Error {
         | GuardError::AdminNotFound
         | GuardError::InvalidThreshold => Error::Unauthorized,
         GuardError::AlreadyInitialized => Error::AlreadyInitialized,
+        GuardError::TooManyGuardians | GuardError::GuardianNotFound => Error::Unauthorized,
     }
 }
 fn require_not_paused(e: &Env, operation: u32) -> Result<(), Error> {
@@ -437,7 +438,8 @@ impl LiquidityPool {
             },
         );
         // Issue #419: initialize EmergencyGuard so all multi-sig checks have a threshold.
-        EmergencyGuard::initialize(e.clone(), vec![&e, admin], 1).map_err(map_guard_err)?;
+        EmergencyGuard::initialize(e.clone(), vec![&e, admin.clone()], 1, admin.clone())
+            .map_err(map_guard_err)?;
         Ok(())
     }
 
@@ -1354,11 +1356,11 @@ impl EmergencyGuardTrait for LiquidityPool {
     fn set_pause_state(env: &Env, operation: u32, paused: bool) -> Result<(), GuardError> {
         DefaultEmergencyGuard::set_pause_state(env, operation, paused)
     }
-    fn unpause(env: &Env, operation: u32) -> Result<(), GuardError> {
-        DefaultEmergencyGuard::unpause(env, operation)
+    fn unpause(env: &Env, admin: Address, operation: u32) -> Result<(), GuardError> {
+        DefaultEmergencyGuard::unpause(env, admin, operation)
     }
-    fn unpause_all(env: &Env) -> Result<(), GuardError> {
-        DefaultEmergencyGuard::unpause_all(env)
+    fn unpause_all(env: &Env, admin: Address) -> Result<(), GuardError> {
+        DefaultEmergencyGuard::unpause_all(env, admin)
     }
     fn emergency_pause_all(env: &Env, approvers: Vec<Address>) -> Result<(), GuardError> {
         DefaultEmergencyGuard::emergency_pause_all(env, approvers)

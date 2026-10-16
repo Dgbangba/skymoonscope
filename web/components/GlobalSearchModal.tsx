@@ -7,6 +7,7 @@ import { Clock, CornerDownLeft, Search, X } from 'lucide-react';
 import {
   buildCommandRegistry,
   filterCommands,
+  groupResultsByCategory,
   isDismissShortcut,
   isSearchShortcut,
   moveHighlight,
@@ -59,8 +60,10 @@ export function GlobalSearchModal() {
   }, [open]);
 
   const commands = useMemo(
-    () => buildCommandRegistry({ functions: MOCK_CONTRACT_FUNCTIONS }),
-    [],
+    () => buildCommandRegistry({ functions: contractFunctions }),
+    // Rebuild whenever the loaded contract's function list changes, so a new
+    // upload is reflected in the search index without a page reload.
+    [contractFunctions],
   );
 
   /**
@@ -83,11 +86,18 @@ export function GlobalSearchModal() {
   const activeIndex = normalizeHighlight(highlight, results.length);
   const activeOptionId = results.length > 0 ? optionIdFor(results[activeIndex]) : undefined;
 
+  // Voice search — transcript updates the query field live as the user speaks.
+  const { supported: voiceSupported, listening, error: voiceError, start: startVoice, stop: stopVoice } =
+    useVoiceSearch({ onTranscript: setQuery });
+
   const close = useCallback(() => {
+    // Stop any active voice session before closing so we don't leave an
+    // orphaned microphone stream.
+    stopVoice();
     setOpen(false);
     setQuery('');
     setHighlight(0);
-  }, []);
+  }, [stopVoice]);
 
   const runCommand = useCallback(
     (command: SearchCommand | undefined) => {
@@ -185,6 +195,10 @@ export function GlobalSearchModal() {
     }
   };
 
+  // Human-readable label for the mic button, used by screen readers and the
+  // tooltip title attribute.
+  const micLabel = listening ? 'Stop voice input' : 'Search by voice';
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[12vh]"
@@ -201,7 +215,19 @@ export function GlobalSearchModal() {
       <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
         {/* Search input */}
         <div className="flex items-center gap-3 border-b border-slate-800 px-4 py-3">
-          <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          {/* Pulsing mic indicator replaces the search icon while listening */}
+          {listening ? (
+            <span
+              className="relative flex h-4 w-4 shrink-0 items-center justify-center"
+              aria-hidden="true"
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
+              <Mic className="relative h-4 w-4 text-cyan-400" />
+            </span>
+          ) : (
+            <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          )}
+
           <input
             ref={inputRef}
             type="text"
@@ -210,12 +236,55 @@ export function GlobalSearchModal() {
             aria-controls="global-search-results"
             aria-activedescendant={activeOptionId}
             aria-autocomplete="list"
-            placeholder="Search pages, functions and settings..."
+            placeholder={listening ? 'Listening…' : 'Search pages, functions and settings...'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleInputKeyDown}
             className="w-full bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
           />
+
+          {/* Mic button — hidden when the browser does not support the API */}
+          {voiceSupported && (
+            <button
+              type="button"
+              data-testid="voice-search-btn"
+              onClick={listening ? stopVoice : startVoice}
+              aria-label={micLabel}
+              aria-pressed={listening}
+              title={micLabel}
+              className={`shrink-0 rounded p-1 transition-colors ${
+                listening
+                  ? 'text-cyan-400 hover:text-cyan-200'
+                  : voiceError
+                    ? 'text-red-400 hover:text-red-300'
+                    : 'text-slate-500 hover:text-slate-200'
+              }`}
+            >
+              {listening ? (
+                <MicOff className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </button>
+          )}
+
+          {/* Inline error hint — appears briefly when mic is denied / unavailable */}
+          {voiceError && voiceError !== 'aborted' && !listening && (
+            <span
+              role="alert"
+              aria-live="polite"
+              className="shrink-0 text-[10px] text-red-400"
+            >
+              {voiceError === 'not-allowed'
+                ? 'Mic blocked'
+                : voiceError === 'no-speech'
+                  ? 'No speech'
+                  : voiceError === 'network'
+                    ? 'Network error'
+                    : 'Voice error'}
+            </span>
+          )}
+
           <button
             type="button"
             onClick={close}
@@ -248,22 +317,13 @@ export function GlobalSearchModal() {
             </li>
           )}
 
-          {results.map((command, index) => (
-            <li
-              key={command.id}
-              id={optionIdFor(command)}
-              role="option"
-              aria-selected={index === activeIndex}
-              data-active={index === activeIndex ? 'true' : 'false'}
-            >
-              <button
-                type="button"
-                tabIndex={-1}
-                onMouseEnter={() => setHighlight(index)}
-                onClick={() => runCommand(command)}
-                className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors ${
-                  index === activeIndex ? 'bg-cyan-500/10' : 'hover:bg-slate-800/60'
-                }`}
+          {groups.map((group) => (
+            <React.Fragment key={group.category}>
+              {/* Category header — presentational only, not a listbox option */}
+              <li
+                role="presentation"
+                aria-hidden="true"
+                className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-slate-500"
               >
                 <span className="min-w-0 flex items-start gap-2">
                   {isShowingHistory && (
