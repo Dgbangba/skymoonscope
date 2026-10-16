@@ -346,25 +346,6 @@ function defaultRamCells(totalBytes: number): RamAllocCell[] {
   }));
 }
 
-// ── RAM region colours ────────────────────────────────────────────────────────
-
-interface RamColors {
-  hex: string;
-  bg: string;
-  border: string;
-  text: string;
-  badge: string;
-}
-
-const RAM_COLORS: Record<RamRegion, RamColors> = {
-  heap:   { hex: '#f59e0b', bg: 'bg-amber-500/20',   border: 'border-amber-500/50',  text: 'text-amber-300',  badge: 'bg-amber-900/70 text-amber-300 border-amber-700'   },
-  host:   { hex: '#10b981', bg: 'bg-emerald-500/20', border: 'border-emerald-500/50',text: 'text-emerald-300',badge: 'bg-emerald-900/70 text-emerald-300 border-emerald-700'},
-  stack:  { hex: '#0ea5e9', bg: 'bg-sky-500/20',     border: 'border-sky-500/50',    text: 'text-sky-300',    badge: 'bg-sky-900/70 text-sky-300 border-sky-700'           },
-  data:   { hex: '#8b5cf6', bg: 'bg-violet-500/20',  border: 'border-violet-500/50', text: 'text-violet-300', badge: 'bg-violet-900/70 text-violet-300 border-violet-700'  },
-  auth:   { hex: '#ec4899', bg: 'bg-pink-500/20',    border: 'border-pink-500/50',   text: 'text-pink-300',   badge: 'bg-pink-900/70 text-pink-300 border-pink-700'         },
-  buffer: { hex: '#64748b', bg: 'bg-slate-600/20',   border: 'border-slate-500/50',  text: 'text-slate-400',  badge: 'bg-slate-800/70 text-slate-400 border-slate-600'      },
-  event:  { hex: '#6366f1', bg: 'bg-indigo-500/20',  border: 'border-indigo-500/50', text: 'text-indigo-300', badge: 'bg-indigo-900/70 text-indigo-300 border-indigo-700'   },
-};
 
 // ── Ledger segment data builders ─────────────────────────────────────────────
 
@@ -433,10 +414,6 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-function fmtInstr(n: number): string {
-  return new Intl.NumberFormat('en-US', { notation: 'compact', compactDisplay: 'short' }).format(n);
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProps) {
@@ -446,6 +423,7 @@ export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProp
   const [hoveredRamId,      setHoveredRamId]      = useState<string | null>(null);
   const [hoveredSegmentId,  setHoveredSegmentId]  = useState<string | null>(null);
   const [hoveredKey,        setHoveredKey]         = useState<string | null>(null);
+  const [zoom,              setZoom]              = useState<number>(1);
 
   // ── Configurable scale breakpoints ─────────────────────────────────────────
   const [breakpoints, setBreakpoints] = useState<ScaleBreakpoints>(DEFAULT_BREAKPOINTS);
@@ -1033,11 +1011,20 @@ export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProp
                   {' • '}{fmtInstr(cpu_instructions)} total instructions ({cpuPct.toFixed(1)}% of budget)
                 </p>
               </div>
-              {!isLiveData && (
-                <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-2 py-1 rounded uppercase tracking-widest">
-                  Estimated
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                <HeatmapZoomControls
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  minZoom={0.5}
+                  maxZoom={1.5}
+                  step={0.1}
+                />
+                {!isLiveData && (
+                  <span className="text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-2 py-1 rounded uppercase tracking-widest">
+                    Estimated
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Configurable legend */}
@@ -1723,3 +1710,32 @@ export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProp
     </div>
   );
 }
+
+// ── Re-exports ────────────────────────────────────────────────────────────────
+
+export {
+  LIMITS,
+  RAM_COLORS,
+  READ_SHADES,
+  WRITE_SHADES,
+  CATEGORY_STYLE,
+  hotspotColors,
+  statusColor,
+  fmtInstr,
+  HeatmapCell,
+  HeatmapTooltip,
+  HeatmapColorScale,
+  HeatmapZoomControls,
+};
+
+export type {
+  FnCategory,
+  RamRegion,
+  RamColors,
+  HotspotColors,
+  CpuHotspotCell,
+  RamAllocCell,
+  LedgerSegment,
+  ResourceHeatmapProps,
+};
+
