@@ -254,6 +254,10 @@ export default function SettingsPage() {
    * The shared timeout and other networks' profiles are untouched.
    */
   const handleReset = useCallback(() => {
+    // Confirm destructive reset
+    if (!window.confirm('Reset settings for the selected network? This action cannot be undone.')) {
+      return;
+    }
     rpcAbortRef.current?.abort();
     indexerAbortRef.current?.abort();
     pingAbortRef.current?.abort();
