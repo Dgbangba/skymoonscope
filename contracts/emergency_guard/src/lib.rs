@@ -75,7 +75,18 @@ pub enum GuardError {
     InvalidThreshold = 4,
     AdminNotFound = 5,
     AlreadyInitialized = 6,
+    /// The guardian list is already at `MAX_GUARDIANS` (#077).
+    TooManyGuardians = 7,
 }
+
+/// Hard ceiling on the size of the guardian set (issue #77).
+///
+/// Guardians live in `instance` storage, and every guarded operation reads the
+/// whole list (multi-sig checks iterate it and `is_admin` scans it). Letting the
+/// set grow without bound therefore inflates the per-call ledger footprint and
+/// lets a storage-flooding caller degrade every guarded operation, so the set is
+/// capped and `add_guardian` is rejected once the cap is reached.
+pub const MAX_GUARDIANS: u32 = 20;
 
 /// Standardized event actions emitted by every successful guard action.
 #[contracttype]
@@ -173,6 +184,14 @@ const EVENT_RESUME_ALL: &str = "emergency_guard_resumed_all";
 const EVENT_ADD_ADMIN: &str = "emergency_guard_admin_added";
 const EVENT_REMOVE_ADMIN: &str = "emergency_guard_admin_removed";
 
+/// Hard ceiling on the guardian (admin) list.
+///
+/// The list lives in `instance` storage and is walked on every multi-sig check,
+/// so an unbounded list is a storage-growth and per-call-footprint problem: each
+/// entry is paid for on every guarded call, forever.  Capping it keeps the cost
+/// of a guard check bounded no matter how the committee grows (#077).
+pub const MAX_GUARDIANS: u32 = 20;
+
 pub fn emit_guard_initialized(e: &Env, admins: &Vec<Address>, threshold: u32) {
     e.events().publish(
         (String::from_str(e, EVENT_INIT_GUARD),),
@@ -244,6 +263,11 @@ impl EmergencyGuard {
         }
         if threshold == 0 || threshold > admins.len() {
             return Err(GuardError::InvalidThreshold);
+        }
+        // The starting committee is subject to the same cap as later additions,
+        // otherwise the bound could be sidestepped entirely at genesis (#077).
+        if admins.len() > MAX_GUARDIANS {
+            return Err(GuardError::TooManyGuardians);
         }
         env.storage().instance().set(&GuardDataKey::Admins, &admins);
         env.storage()
@@ -384,6 +408,11 @@ impl EmergencyGuard {
     }
 
     /// Add new admin (multi-sig required).
+    ///
+    /// Rejected with `GuardError::TooManyGuardians` once the list holds
+    /// `MAX_GUARDIANS` entries, so the committee cannot grow without bound
+    /// (#077). Adding an address that is already a guardian is a no-op and is
+    /// still allowed at the cap.
     pub fn add_admin(
         env: Env,
         approvers: Vec<Address>,
@@ -392,6 +421,9 @@ impl EmergencyGuard {
         Self::check_multi_sig(&env, &approvers)?;
         let mut admins = Self::get_admins(env.clone());
         if !admins.iter().any(|a| a == new_admin) {
+            if admins.len() >= MAX_GUARDIANS {
+                return Err(GuardError::TooManyGuardians);
+            }
             admins.push_back(new_admin.clone());
             env.storage().instance().set(&GuardDataKey::Admins, &admins);
             emit_guard_event(
@@ -409,6 +441,31 @@ impl EmergencyGuard {
             emit_admin_added(&env, &approvers, &new_admin);
         }
         Ok(())
+    }
+
+    /// Add a guardian to the guardian set (multi-sig required).
+    ///
+    /// Guardians are this contract's admins: the addresses that can pause
+    /// operations and that co-sign privileged changes. This is the name issue
+    /// #77 refers to; it is the same operation as [`EmergencyGuard::add_admin`]
+    /// and is subject to the same [`MAX_GUARDIANS`] cap.
+    pub fn add_guardian(
+        env: Env,
+        approvers: Vec<Address>,
+        new_guardian: Address,
+    ) -> Result<(), GuardError> {
+        Self::add_admin(env, approvers, new_guardian)
+    }
+
+    /// Number of guardian slots still available before `MAX_GUARDIANS`.
+    pub fn guardian_capacity(env: Env) -> u32 {
+        let len = Self::get_admins(env).len();
+        MAX_GUARDIANS.saturating_sub(len)
+    }
+
+    /// Whether the guardian set is at its `MAX_GUARDIANS` cap.
+    pub fn is_guardian_set_full(env: Env) -> bool {
+        Self::guardian_capacity(env) == 0
     }
 
     /// Remove admin (multi-sig required).
