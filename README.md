@@ -138,6 +138,7 @@ The web dashboard includes an interactive **Token Yield & Staking Calculator Wid
 - **Interactive Parameters**: Sliders and numerical inputs for Deposit Amount, Lock Duration (1-36M), Base APY, Compound Frequency (Daily, Weekly, Monthly, Quarterly, Annually, Simple Interest), and Duration Tier Multiplier toggles.
 - **Real-Time Return Projections**: Computes Projected Total Balance, Total Rewards, Effective APY, ROI %, and Estimated Daily & Monthly Earnings.
 - **Milestone Schedule**: Interactive Monthly Milestone Schedule detailing cumulative yield and balance progression.
+- **Share as Link**: Generates a shareable URL encoding the current calculator configuration (deposit amount, lock duration, base APY, compound frequency, and tier multiplier), so a setup can be copied to the clipboard and restored by anyone opening the link.
 - **Unit Testing**: Tests under `web/lib/stakingCalculator.test.cjs` and `web/components/StakingCalculator.test.cjs`.
 
 ---
@@ -161,6 +162,7 @@ The resulting `.wasm` files will be located in `target/wasm32-unknown-unknown/re
 - **Phase 1 [COMPLETED]:** Core CLI engine for resource extraction.
 - **Phase 2 [IN PROGRESS]:** Integration of Frontend dashboard with Backend simulation engine.
 - **Phase 3 [IN PROGRESS]:** Automated optimization recommendations (Gas Golfing Analysis ✓).
+- **Phase 4 [IN PROGRESS]:** Collaboration features — shareable staking calculator configurations via link.
 
 ---
 
