@@ -6,7 +6,7 @@ use crate::{
     SignedBatchVerificationResult, SignedMessage, LEAF_PREFIX, MAX_PROOF_LENGTH, NODE_PREFIX,
 };
 use ed25519_dalek::{Signer, SigningKey};
-use soroban_sdk::{testutils::Address as _, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{testutils::Address as _, testutils::Events, Address, Bytes, BytesN, Env, Vec};
 
 fn make_payload(env: &Env, nonce: u64) -> Payload {
     let chain_id = 1;
@@ -144,6 +144,10 @@ fn test_verify_message_success() {
 
     let result = client.verify_message(&block_height, &payload, &proof, &proof_flags);
     assert!(result);
+
+    // A successful verification must emit an event.
+    let events = env.events().all();
+    assert!(!events.is_empty());
 }
 
 #[test]

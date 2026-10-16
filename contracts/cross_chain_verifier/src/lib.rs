@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, Vec,
+    contract, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Vec,
 };
 
 #[contracttype]
@@ -268,6 +268,10 @@ impl CrossChainVerifier {
         }
 
         env.storage().persistent().set(&processed_key, &true);
+        env.events().publish(
+            (symbol_short!("verified"), symbol_short!("signed")),
+            (block_height, message_hash),
+        );
         true
     }
 
@@ -303,6 +307,10 @@ impl CrossChainVerifier {
         env.storage()
             .persistent()
             .set(&DataKey::ProcessedNonce(payload.nonce), &true);
+        env.events().publish(
+            (symbol_short!("verified"), symbol_short!("message")),
+            (block_height, payload.nonce, leaf),
+        );
         true
     }
 
@@ -330,6 +338,10 @@ impl CrossChainVerifier {
         env.storage()
             .persistent()
             .set(&DataKey::ProcessedNonce(nonce), &true);
+        env.events().publish(
+            (symbol_short!("verified"), symbol_short!("consume")),
+            (block_height, nonce, leaf),
+        );
         true
     }
 
@@ -386,6 +398,10 @@ impl CrossChainVerifier {
             env.storage()
                 .persistent()
                 .set(&DataKey::ProcessedNonce(msg.payload.nonce), &true);
+            env.events().publish(
+                (symbol_short!("verified"), symbol_short!("batch")),
+                (msg.block_height, msg.payload.nonce, leaf),
+            );
             succeeded += 1;
         }
 
@@ -444,6 +460,10 @@ impl CrossChainVerifier {
 
             // Mark message as processed
             env.storage().persistent().set(&processed_key, &true);
+            env.events().publish(
+                (symbol_short!("verified"), symbol_short!("signed_b")),
+                (msg.block_height, message_hash),
+            );
             succeeded += 1;
         }
 

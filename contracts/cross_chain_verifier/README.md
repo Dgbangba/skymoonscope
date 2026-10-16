@@ -4,6 +4,8 @@
 
 The `cross_chain_verifier` contract enables trustless verification of cross-chain messages on Stellar/Soroban. A trusted relayer network posts Merkle state roots (one per source-chain block height), and any party can then prove that a specific message or transaction was included in that block by supplying a Binary Merkle Tree (BMT) proof.
 
+Every successful cross-chain verification emits an event so that off-chain indexers and monitoring services can observe verification activity. See [Events](#events) for the emitted topics and data.
+
 ```
 Source Chain Block
         │
@@ -43,6 +45,8 @@ Returns the stored state root for a block height, or `None` if not yet posted.
 ### `verify_message(block_height, leaf, proof, proof_flags) → bool`
 Verifies a Binary Merkle Tree proof. Returns `true` if the `leaf` (message hash) is provably included in the state root at `block_height`. Does **not** consume the nonce — use `verify_message_and_consume` to prevent replays.
 
+On a successful verification, emits a `verify` event (see [Events](#events)).
+
 | Parameter | Type | Description |
 |---|---|---|
 | `block_height` | `u32` | Source-chain block height to verify against |
@@ -51,6 +55,8 @@ Verifies a Binary Merkle Tree proof. Returns `true` if the `leaf` (message hash)
 
 ### `verify_batch(messages: Vec<BatchMessage>) → BatchVerificationResult`
 Verifies multiple messages in a single batch call to reduce per-call overhead. Returns a structured result indicating which messages succeeded and which failed.
+
+For each successfully verified message, emits a `verify` event (see [Events](#events)).
 
 **Performance Benefit:** 20-30% reduction in per-message overhead for batch sizes > 5 messages.
 
@@ -81,6 +87,8 @@ pub struct BatchVerificationResult {
 ### `verify_signed_batch(messages: Vec<SignedBatchMessage>) → SignedBatchVerificationResult`
 Verifies multiple signed messages in a single batch call. Similar to `verify_batch` but for signed messages with signature verification.
 
+For each successfully verified message, emits a `verify` event (see [Events](#events)).
+
 | Parameter | Type | Description |
 |---|---|---|
 | `messages` | `Vec<SignedBatchMessage>` | Array of signed batch messages to verify |
@@ -109,6 +117,8 @@ pub struct SignedBatchVerificationResult {
 ### `verify_message_and_consume(block_height, nonce, leaf, proof, proof_flags) → bool`
 Like `verify_message` but also marks `nonce` as processed. Panics with `"nonce already processed"` if the same nonce is submitted a second time, providing built-in replay protection.
 
+On a successful verification, emits a `verify` event (see [Events](#events)).
+
 | Parameter | Type | Description |
 |---|---|---|
 | `nonce` | `u64` | Unique identifier for this message; must not have been used before |
@@ -134,6 +144,8 @@ Returns the number of currently authorized signers.
 
 ### `verify_signed_message(signed_message, block_height, proof, proof_flags) → bool`
 Verifies that a `SignedMessage` was both included in the Merkle tree at `block_height` and signed by a currently authorized signer. Returns `false` if either check fails.
+
+On a successful verification, emits a `verify` event (see [Events](#events)).
 
 ---
 
@@ -167,6 +179,38 @@ proof_flags = [true, false]
    - If `is_left`: `current = SHA-256(sibling || current)`
    - If not `is_left`: `current = SHA-256(current || sibling)`
 3. Assert `current == stored_root`
+
+---
+
+## Events
+
+Every successful cross-chain verification emits an event so that off-chain indexers and monitoring services can observe verification activity.
+
+### `verify`
+
+Emitted once per successfully verified message. Failed verifications do **not** emit an event.
+
+**Topics:**
+
+| Topic | Type | Description |
+|---|---|---|
+| `"verify"` | `Symbol` | Event name |
+| `block_height` | `u32` | Source-chain block height the message was verified against |
+
+**Data:**
+
+| Field | Type | Description |
+|---|---|---|
+| `leaf` | `BytesN<32>` | SHA-256 hash of the verified cross-chain message |
+| `nonce` | `Option<u64>` | The consumed nonce, if the call was `verify_message_and_consume`; `None` otherwise |
+
+**Emitted by:**
+
+- `verify_message`
+- `verify_message_and_consume`
+- `verify_batch` (once per successfully verified message)
+- `verify_signed_batch` (once per successfully verified message)
+- `verify_signed_message`
 
 ---
 
@@ -379,6 +423,7 @@ soroban contract invoke \
 | `verify_message` with unknown `block_height` | Panics: `"State root not found"` |
 | `proof.len() != proof_flags.len()` | Panics: `"Invalid proof format"` |
 | Proof does not reconstruct the stored root | Returns `false` |
+| Verification succeeds | Emits a `verify` event (see [Events](#events)) |
 
 ---
 
@@ -388,6 +433,7 @@ soroban contract invoke \
 - **Root history**: Only the latest root per block height is stored. If a relayer posts an incorrect root and then corrects it, the old root is overwritten. Consumers should verify the root matches the source chain before relying on it.
 - **Proof malleability**: The SHA-256 hash function used here is collision-resistant. Proofs cannot be forged without breaking SHA-256.
 - **Replay protection**: `verify_message` is a read-only view — it does not record which messages have been processed. Contracts consuming this verifier must track used nullifiers or message IDs themselves to prevent replay attacks.
+- **Event observability**: Successful verifications emit a `verify` event, allowing off-chain indexers to track verification activity without polling contract state.
 
 ---
 
@@ -407,6 +453,7 @@ Test coverage includes:
 - `test_root_update` — relayer posts and retrieves a root
 - `test_verify_message_success` — valid 2-level proof returns `true`
 - `test_verify_message_no_root` — panics when block height has no root
+- `test_verify_message_emits_event` — successful verification emits a `verify` event
 
 ---
 
