@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
-import { CornerDownLeft, Search, X } from 'lucide-react';
+import { Clock, CornerDownLeft, Search, X } from 'lucide-react';
 
 import {
   buildCommandRegistry,
@@ -12,6 +12,13 @@ import {
   moveHighlight,
 } from '../lib/searchCommands';
 import type { SearchCommand } from '../lib/searchCommands';
+import {
+  historyToCommands,
+  loadHistory,
+  pushHistory,
+  saveHistory,
+} from '../lib/searchHistory';
+import type { HistoryEntry } from '../lib/searchHistory';
 import { MOCK_CONTRACT_FUNCTIONS } from '../lib/sorobantypes';
 
 /**
@@ -25,19 +32,46 @@ export const SEARCH_COMMAND_EVENT = 'sky-moon-scope:search-command';
  *
  * Mounted once in `_app`, so Cmd+K / Ctrl+K works on every page without moving
  * the mouse to the header.
+ *
+ * Features:
+ * - Search history: recently run commands surface at the top when the query is
+ *   empty, labelled with a clock icon. Selecting any command persists it.
+ * - Contract function type hints: function titles carry inline parameter and
+ *   return-type signatures; subtitles list each param with its Soroban type.
  */
 export function GlobalSearchModal() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load history from localStorage when the modal first opens.
+  useEffect(() => {
+    if (open) {
+      setHistory(loadHistory());
+    }
+  }, [open]);
 
   const commands = useMemo(
     () => buildCommandRegistry({ functions: MOCK_CONTRACT_FUNCTIONS }),
     [],
   );
-  const results = useMemo(() => filterCommands(commands, query), [commands, query]);
+
+  /**
+   * When the query is empty show recently visited commands (history).
+   * When the user is typing show ranked search results.
+   */
+  const results = useMemo(() => {
+    const trimmed = query.trim();
+    if (trimmed === '') {
+      return historyToCommands(history);
+    }
+    return filterCommands(commands, query);
+  }, [commands, query, history]);
+
+  const isShowingHistory = query.trim() === '' && history.length > 0;
 
   const close = useCallback(() => {
     setOpen(false);
@@ -48,6 +82,12 @@ export function GlobalSearchModal() {
   const runCommand = useCallback(
     (command: SearchCommand | undefined) => {
       if (!command) return;
+
+      // Persist to history before navigating / dispatching.
+      const updatedHistory = pushHistory(loadHistory(), command);
+      saveHistory(updatedHistory);
+      setHistory(updatedHistory);
+
       close();
 
       if (command.href) {
@@ -68,18 +108,14 @@ export function GlobalSearchModal() {
 
   // Global shortcut listener — intentionally on window so it fires regardless
   // of which element currently has focus.
-  // Fixed: Properly handle listener cleanup to prevent duplicates and ensure
-  // the modal can be opened/closed reliably with Esc key.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Handle search shortcut (Cmd+K or Ctrl+K)
       if (isSearchShortcut(event)) {
         event.preventDefault();
         setOpen((prev) => !prev);
         return;
       }
-      
-      // Handle dismiss shortcut (Escape) — only if modal is open
+
       if (isDismissShortcut(event) && open) {
         event.preventDefault();
         setOpen(false);
@@ -87,8 +123,6 @@ export function GlobalSearchModal() {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    
-    // Cleanup: Remove listener when component unmounts or dependencies change
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -142,6 +176,7 @@ export function GlobalSearchModal() {
       />
 
       <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        {/* Search input */}
         <div className="flex items-center gap-3 border-b border-slate-800 px-4 py-3">
           <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
           <input
@@ -167,8 +202,23 @@ export function GlobalSearchModal() {
           </button>
         </div>
 
+        {/* Section heading when showing history */}
+        {isShowingHistory && (
+          <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+            <Clock className="h-3 w-3 text-slate-500" aria-hidden="true" />
+            <span className="text-[11px] uppercase tracking-wider text-slate-500">
+              Recently visited
+            </span>
+          </div>
+        )}
+
         <ul id="global-search-results" role="listbox" className="max-h-80 overflow-y-auto py-2">
-          {results.length === 0 && (
+          {results.length === 0 && query.trim() === '' && (
+            <li className="px-4 py-6 text-center text-sm text-slate-500">
+              Start typing to search pages and functions&hellip;
+            </li>
+          )}
+          {results.length === 0 && query.trim() !== '' && (
             <li className="px-4 py-6 text-center text-sm text-slate-500">
               No matches for &ldquo;{query}&rdquo;
             </li>
@@ -184,19 +234,27 @@ export function GlobalSearchModal() {
                   index === highlight ? 'bg-cyan-500/10' : 'hover:bg-slate-800/60'
                 }`}
               >
-                <span className="min-w-0">
-                  <span
-                    className={`block truncate text-sm font-medium ${
-                      index === highlight ? 'text-cyan-300' : 'text-slate-200'
-                    }`}
-                  >
-                    {command.title}
-                  </span>
-                  {command.subtitle && (
-                    <span className="block truncate text-xs text-slate-500">
-                      {command.subtitle}
-                    </span>
+                <span className="min-w-0 flex items-start gap-2">
+                  {isShowingHistory && (
+                    <Clock
+                      className="mt-0.5 h-3 w-3 shrink-0 text-slate-500"
+                      aria-hidden="true"
+                    />
                   )}
+                  <span>
+                    <span
+                      className={`block truncate text-sm font-medium ${
+                        index === highlight ? 'text-cyan-300' : 'text-slate-200'
+                      }`}
+                    >
+                      {command.title}
+                    </span>
+                    {command.subtitle && (
+                      <span className="block truncate text-xs text-slate-500">
+                        {command.subtitle}
+                      </span>
+                    )}
+                  </span>
                 </span>
                 <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-500">
                   {command.group}

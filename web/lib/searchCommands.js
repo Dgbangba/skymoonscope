@@ -122,26 +122,78 @@ function filterCommands(commands, query, options = {}) {
 }
 
 /**
+ * Build a human-readable parameter hint string from a contract function's
+ * input list, e.g. `(from: address, to: address, amount: u128)`.
+ *
+ * Falls back gracefully when `inputs` is absent or empty.
+ *
+ * @param {Array<{name: string, type: string, optional?: boolean}>} inputs
+ * @returns {string}
+ */
+function buildParamHint(inputs) {
+  if (!Array.isArray(inputs) || inputs.length === 0) return '()';
+  const parts = inputs.map((input) => {
+    const name = String(input.name ?? '');
+    const type = String(input.type ?? '');
+    const suffix = input.optional ? '?' : '';
+    return `${name}${suffix}: ${type}`;
+  });
+  return `(${parts.join(', ')})`;
+}
+
+/**
  * Build the searchable command list, optionally extended with contextual
  * entries such as the current contract's functions.
  *
- * @param {{ functions?: Array<{name: string}>, extra?: Array<object> }} [context]
+ * Contract function commands include a parameter type-hint subtitle and extra
+ * keywords derived from parameter names and types so users can search for
+ * e.g. "address" or "u128" to surface relevant functions.
+ *
+ * @param {{ functions?: Array<{name: string, inputs?: Array<{name:string,type:string,optional?:boolean}>, outputs?: string}>, extra?: Array<object> }} [context]
  */
 function buildCommandRegistry(context = {}) {
   const functionCommands = (Array.isArray(context.functions) ? context.functions : []).map(
-    (fn) => ({
-      id: `fn-${fn.name}`,
-      title: fn.name,
-      subtitle: 'Select this contract function',
-      group: 'Contract functions',
-      action: 'select-function',
-      payload: { name: fn.name },
-      keywords: ['function', 'invoke', 'call'],
-    }),
+    (fn) => {
+      const paramHint = buildParamHint(fn.inputs);
+      const outputHint = fn.outputs ? ` → ${fn.outputs}` : '';
+      const paramKeywords = Array.isArray(fn.inputs)
+        ? fn.inputs.flatMap((input) => [input.name, input.type].filter(Boolean))
+        : [];
+
+      return {
+        id: `fn-${fn.name}`,
+        title: `${fn.name}${paramHint}${outputHint}`,
+        subtitle: buildFunctionSubtitle(fn),
+        group: 'Contract functions',
+        action: 'select-function',
+        payload: { name: fn.name },
+        keywords: ['function', 'invoke', 'call', ...paramKeywords],
+      };
+    },
   );
 
   const extra = Array.isArray(context.extra) ? context.extra : [];
   return [...BASE_COMMANDS, ...functionCommands, ...extra];
+}
+
+/**
+ * Build a subtitle for a contract function that describes its parameters.
+ *
+ * @param {{ inputs?: Array<{name: string, type: string, description?: string, optional?: boolean}>, outputs?: string }} fn
+ * @returns {string}
+ */
+function buildFunctionSubtitle(fn) {
+  if (!Array.isArray(fn.inputs) || fn.inputs.length === 0) {
+    return fn.outputs ? `Returns ${fn.outputs}` : 'No parameters';
+  }
+  const paramList = fn.inputs
+    .map((input) => {
+      const optional = input.optional ? ' (optional)' : '';
+      const description = input.description ? ` — ${input.description}` : '';
+      return `${input.name}: ${input.type}${optional}${description}`;
+    })
+    .join(', ');
+  return `Params: ${paramList}`;
 }
 
 /** Wrap-around cursor movement for arrow-key navigation. */
@@ -158,5 +210,7 @@ module.exports = {
   scoreCommand,
   filterCommands,
   buildCommandRegistry,
+  buildParamHint,
+  buildFunctionSubtitle,
   moveHighlight,
 };
