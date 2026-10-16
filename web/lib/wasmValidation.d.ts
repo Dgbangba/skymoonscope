@@ -50,6 +50,7 @@ export interface WasmValidationReport {
   exports: WasmExportEntry[];
   imports: WasmImportEntry[];
   dataSegments: WasmDataSegment[];
+  sorobanMeta?: import('./sorobanMeta').SorobanMetaDecodeResult;
   errors: string[];
   warnings: string[];
   durationMs: number;

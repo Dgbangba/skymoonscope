@@ -322,3 +322,47 @@ test('panel logic: active segment byteLength tracks initialiser data size', () =
   const report = validateWasmModule(module);
   assert.equal(report.dataSegments[0].byteLength, 128);
 });
+
+test('panel logic: validateWasmModule populates sorobanMeta for modules with Soroban sections', () => {
+  // Build a custom section for contractmetav0:
+  // ScMetaEntry::ScMetaV0: discriminant 0, key 'rssdkver', value '22.0.0'
+  function xdrStr(str) {
+    const bytes = Array.from(Buffer.from(str, 'utf8'));
+    const len = bytes.length;
+    const pad = (4 - (len % 4)) % 4;
+    return [
+      0x00, 0x00, 0x00, len,
+      ...bytes,
+      ...new Array(pad).fill(0),
+    ];
+  }
+  const metaPayload = [
+    0x00, 0x00, 0x00, 0x00, // discriminant 0
+    ...xdrStr('rssdkver'),
+    ...xdrStr('22.0.0'),
+  ];
+  const sectionName = Array.from(Buffer.from('contractmetav0', 'utf8'));
+  const customSectionBytes = [
+    ...leb128(sectionName.length),
+    ...sectionName,
+    ...metaPayload,
+  ];
+
+  const module = buildModule([
+    exportSection(['init']),
+    [0x00, customSectionBytes], // id 0 = custom section
+  ]);
+
+  const report = validateWasmModule(module);
+  assert.ok(report.sorobanMeta, 'sorobanMeta should be populated');
+  assert.equal(report.sorobanMeta.contractMeta.length, 1);
+  assert.equal(report.sorobanMeta.contractMeta[0].key, 'rssdkver');
+  assert.equal(report.sorobanMeta.contractMeta[0].value, '22.0.0');
+});
+
+test('panel logic: validateWasmModule does not populate sorobanMeta when no Soroban sections exist', () => {
+  const module = buildModule([exportSection(['init'])]);
+  const report = validateWasmModule(module);
+  assert.equal(report.sorobanMeta, undefined);
+});
+

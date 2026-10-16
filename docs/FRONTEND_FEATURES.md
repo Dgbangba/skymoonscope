@@ -256,5 +256,33 @@ interface WasmDataSegment {
 interface WasmValidationReport {
   // ... existing fields ...
   dataSegments: WasmDataSegment[];
+  sorobanMeta?: SorobanMetaDecodeResult;
 }
 ```
+
+---
+
+## 5. Soroban metadata decoding from WASM custom sections (issue #413)
+
+Parses Soroban-specific custom sections embedded in WASM binaries by the official
+Soroban Rust SDK (`soroban-sdk`):
+
+| Section | Content | Decoded representation |
+| --- | --- | --- |
+| `contractmetav0` | Build and SDK metadata (e.g. `rssdkver`, `rsver`) | Key-value pairs (`SorobanMetaKV[]`) |
+| `contractspecv0` | Full contract ABI (functions, params, returns, types) | Functions (`SorobanSpecFunction[]`), types (`SorobanSpecType[]`) |
+
+| File | Role |
+| --- | --- |
+| `public/wasm/sorobanMeta.js` | Zero-dependency UMD decoder for `contractmetav0` & `contractspecv0` |
+| `lib/sorobanMeta.js` / `.d.ts` | App-facing entry point and TypeScript declarations |
+| `components/SorobanMetadataPanel.tsx` | Interactive UI panel displaying ABI signatures, types, and build metadata |
+| `lib/sorobanMeta.test.cjs` | Unit tests for XDR primitives, custom section search, and decoding |
+| `components/SorobanMetadataPanel.test.cjs` | Tests for metadata filtering and signature generation |
+
+### Integration
+
+- **Off-thread validation**: `public/wasm/wasmWorker.js` loads `sorobanMeta.js` and decodes metadata inside the worker.
+- **Section summary panel**: `components/WasmSectionSummary.tsx` displays a **Soroban Spec** tab whenever Soroban custom sections are detected in the uploaded WASM.
+- **Backend decoder**: `core/src/soroban_meta_decoder.rs` provides the Rust counterpart using `soroban-sdk`'s native XDR reader.
+

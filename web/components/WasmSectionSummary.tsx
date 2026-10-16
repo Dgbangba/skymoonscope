@@ -2,9 +2,10 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronRight, ArrowDownToLine, ArrowUpFromLine, Database, Layers } from "lucide-react";
+import { ChevronDown, ChevronRight, ArrowDownToLine, ArrowUpFromLine, Database, Layers, FileCode2 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import SorobanMetadataPanel from "./SorobanMetadataPanel";
 import type {
   WasmValidationReport,
   WasmImportEntry,
@@ -19,7 +20,7 @@ function cn(...inputs: ClassValue[]) {
 
 // ── Tab identifiers ──────────────────────────────────────────────────────────
 
-type TabId = "imports" | "exports" | "data" | "sections";
+type TabId = "imports" | "exports" | "data" | "sections" | "soroban";
 
 interface Tab {
   id: TabId;
@@ -280,6 +281,13 @@ export default function WasmSectionSummaryPanel({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [activeTab, setActiveTab] = useState<TabId>("exports");
 
+  const hasSorobanMeta = Boolean(
+    report.sorobanMeta &&
+      ((report.sorobanMeta.specFunctions?.length ?? 0) > 0 ||
+        (report.sorobanMeta.specTypes?.length ?? 0) > 0 ||
+        (report.sorobanMeta.contractMeta?.length ?? 0) > 0)
+  );
+
   const tabs: Tab[] = [
     {
       id: "exports",
@@ -287,6 +295,18 @@ export default function WasmSectionSummaryPanel({
       icon: ArrowUpFromLine,
       count: report.exports.length,
     },
+    ...(hasSorobanMeta
+      ? [
+          {
+            id: "soroban" as TabId,
+            label: "Soroban Spec",
+            icon: FileCode2,
+            count:
+              (report.sorobanMeta?.specFunctions.length ?? 0) +
+              (report.sorobanMeta?.specTypes.length ?? 0),
+          },
+        ]
+      : []),
     {
       id: "imports",
       label: "Imports",
@@ -435,6 +455,19 @@ export default function WasmSectionSummaryPanel({
                   <SectionsPane sections={report.sections} />
                 )}
               </div>
+              {hasSorobanMeta && report.sorobanMeta && (
+                <div
+                  role="tabpanel"
+                  id={`wasm-panel-soroban`}
+                  aria-labelledby={`wasm-tab-soroban`}
+                  hidden={activeTab !== "soroban"}
+                  className="p-3"
+                >
+                  {activeTab === "soroban" && (
+                    <SorobanMetadataPanel metadata={report.sorobanMeta} />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Warnings footer */}
