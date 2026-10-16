@@ -53,9 +53,11 @@ Flow measures real DOM nodes.
 
 | File | Role |
 | --- | --- |
-| `lib/searchCommands.js` / `.d.ts` | Command registry, shortcut detection, ranking |
+| `lib/searchCommands.js` / `.d.ts` | Command registry, shortcut detection, ranking, parameter-hint builders |
+| `lib/searchHistory.js` / `.d.ts` | Search history — persist/load recently visited commands from localStorage |
 | `components/GlobalSearchModal.tsx` | The overlay; mounted once in `pages/_app.tsx` |
-| `lib/searchCommands.test.cjs` | Unit tests for matching and keyboard navigation |
+| `lib/searchCommands.test.cjs` | Unit tests for matching, keyboard navigation, and parameter hints |
+| `lib/searchHistory.test.cjs` | Unit tests for history push/dedup/remove/clear |
 
 The listener sits on `window` so the shortcut fires regardless of focus.
 `Escape`, the backdrop and the close button all dismiss it; `↑`/`↓` move the
@@ -76,6 +78,45 @@ substring, then a loose subsequence fallback. Ties keep registry order so the
 list does not reshuffle while typing.
 
 Adding a command means appending one object to `BASE_COMMANDS`.
+
+### Search history (recently visited panels)
+
+When the query is empty the overlay shows the **Recently visited** section
+instead of a blank list. Every time the user selects a command it is pushed to
+the top of a LocalStorage-backed history list (key
+`sky-moon-scope:search-history`, capped at 8 entries). The list deduplicates by
+command `id` so revisiting a panel simply bubbles it to the top rather than
+creating a duplicate entry.
+
+```
+lib/searchHistory.js   pushHistory / removeHistoryEntry / clearHistory
+                       commandToEntry / historyToCommands
+                       loadHistory / saveHistory (localStorage adapter)
+```
+
+`historyToCommands` converts stored entries back to `SearchCommand`-shaped
+objects (with `group: 'Recent'`) so they flow through the existing
+`filterCommands` ranking pipeline unchanged when the user starts typing.
+
+### Contract function parameter type hints
+
+Contract function commands in the registry now surface full parameter and
+return-type information so developers can search by type or parameter name:
+
+- **Title** — `transfer(from: address, to: address, amount: u128) → bool`
+  (inline signature with optional `?` suffix for optional params).
+- **Subtitle** — `Params: from: address — Sender address, to: address —
+  Recipient address, amount: u128` (per-param description if present).
+- **Keywords** — parameter names and Soroban types are added as search keywords,
+  so typing `u128` or `address` in the search box surfaces every matching
+  function.
+
+Two helper functions are exported from `lib/searchCommands.js`:
+
+| Function | Purpose |
+| --- | --- |
+| `buildParamHint(inputs)` | Formats `(name: type, …)` from a `ContractInput[]` |
+| `buildFunctionSubtitle(fn)` | Builds a human-readable param listing for the subtitle |
 
 ---
 

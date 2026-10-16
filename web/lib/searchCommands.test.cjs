@@ -14,6 +14,8 @@ const {
   scoreCommand,
   filterCommands,
   buildCommandRegistry,
+  buildParamHint,
+  buildFunctionSubtitle,
   moveHighlight,
 } = require('./searchCommands');
 
@@ -55,7 +57,7 @@ test('buildCommandRegistry: includes the base navigation commands', () => {
 });
 
 test('buildCommandRegistry: appends contract functions as selectable commands', () => {
-  const registry = buildCommandRegistry({ functions: [{ name: 'transfer' }, { name: 'mint' }] });
+  const registry = buildCommandRegistry({ functions: [{ name: 'transfer', inputs: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'amount', type: 'u128' }], outputs: 'bool' }, { name: 'mint', inputs: [] }] });
   const transfer = registry.find((c) => c.id === 'fn-transfer');
   assert.ok(transfer);
   assert.equal(transfer.action, 'select-function');
@@ -184,118 +186,120 @@ test('moveHighlight: stays at 0 for an empty result list', () => {
   assert.equal(moveHighlight(3, -1, 0), 0);
 });
 
-// ── Search result grouping ──────────────────────────────────────────────────
+// ── Parameter type hints ─────────────────────────────────────────────────────
 
-const { categoryForGroup, groupResultsByCategory } = require('./searchCommands');
-
-// categoryForGroup ────────────────────────────────────────────────────────────
-
-test('categoryForGroup: Navigation maps to pages', () => {
-  assert.equal(categoryForGroup('Navigation'), 'pages');
-});
-
-test('categoryForGroup: Preferences maps to settings', () => {
-  assert.equal(categoryForGroup('Preferences'), 'settings');
-});
-
-test('categoryForGroup: Contract functions maps to functions', () => {
-  assert.equal(categoryForGroup('Contract functions'), 'functions');
-});
-
-test('categoryForGroup: unknown group falls back to pages', () => {
-  assert.equal(categoryForGroup('Something Else'), 'pages');
-  assert.equal(categoryForGroup(''), 'pages');
-});
-
-// groupResultsByCategory ──────────────────────────────────────────────────────
-
-const GROUPED_COMMANDS = [
-  { id: 'nav-explorer', title: 'Explorer', group: 'Navigation', href: '/?tab=explorer' },
-  { id: 'nav-history',  title: 'History',  group: 'Navigation', href: '/?tab=history' },
-  { id: 'fn-transfer',  title: 'transfer', group: 'Contract functions', action: 'select-function' },
-  { id: 'nav-settings', title: 'Settings', group: 'Preferences', href: '/settings' },
-];
-
-test('groupResultsByCategory: returns one bucket per present category', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  const cats = groups.map((g) => g.category);
-  assert.deepEqual(cats, ['pages', 'functions', 'settings']);
-});
-
-test('groupResultsByCategory: pages bucket contains Navigation items', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  const pages = groups.find((g) => g.category === 'pages');
-  assert.ok(pages);
-  assert.equal(pages.commands.length, 2);
-  assert.ok(pages.commands.some((c) => c.id === 'nav-explorer'));
-  assert.ok(pages.commands.some((c) => c.id === 'nav-history'));
-});
-
-test('groupResultsByCategory: functions bucket contains contract function items', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  const fns = groups.find((g) => g.category === 'functions');
-  assert.ok(fns);
-  assert.equal(fns.commands.length, 1);
-  assert.equal(fns.commands[0].id, 'fn-transfer');
-});
-
-test('groupResultsByCategory: settings bucket contains Preferences items', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  const settings = groups.find((g) => g.category === 'settings');
-  assert.ok(settings);
-  assert.equal(settings.commands.length, 1);
-  assert.equal(settings.commands[0].id, 'nav-settings');
-});
-
-test('groupResultsByCategory: each bucket has a human-readable label', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  for (const group of groups) {
-    assert.ok(typeof group.label === 'string' && group.label.length > 0,
-      `category "${group.category}" should have a non-empty label`);
-  }
-  assert.equal(groups.find((g) => g.category === 'pages').label, 'Pages');
-  assert.equal(groups.find((g) => g.category === 'functions').label, 'Functions');
-  assert.equal(groups.find((g) => g.category === 'settings').label, 'Settings');
-});
-
-test('groupResultsByCategory: category order is always pages → functions → settings', () => {
-  // Provide items in reverse order to confirm output order is fixed.
-  const reversed = [...GROUPED_COMMANDS].reverse();
-  const cats = groupResultsByCategory(reversed).map((g) => g.category);
-  assert.deepEqual(cats, ['pages', 'functions', 'settings']);
-});
-
-test('groupResultsByCategory: omits empty categories', () => {
-  const onlyFunctions = [
-    { id: 'fn-mint', title: 'mint', group: 'Contract functions', action: 'select-function' },
+test('buildParamHint: formats a function with multiple inputs', () => {
+  const inputs = [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'amount', type: 'u128' },
   ];
-  const groups = groupResultsByCategory(onlyFunctions);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].category, 'functions');
+  assert.equal(buildParamHint(inputs), '(from: address, to: address, amount: u128)');
 });
 
-test('groupResultsByCategory: returns empty array for empty input', () => {
-  assert.deepEqual(groupResultsByCategory([]), []);
+test('buildParamHint: handles a no-argument function', () => {
+  assert.equal(buildParamHint([]), '()');
+  assert.equal(buildParamHint(null), '()');
+  assert.equal(buildParamHint(undefined), '()');
 });
 
-test('groupResultsByCategory: tolerates non-array input', () => {
-  assert.deepEqual(groupResultsByCategory(null), []);
-  assert.deepEqual(groupResultsByCategory(undefined), []);
+test('buildParamHint: marks optional parameters with a trailing ?', () => {
+  const inputs = [
+    { name: 'account', type: 'address' },
+    { name: 'memo', type: 'string', optional: true },
+  ];
+  assert.equal(buildParamHint(inputs), '(account: address, memo?: string)');
 });
 
-test('groupResultsByCategory: preserves within-category registry order', () => {
-  const groups = groupResultsByCategory(GROUPED_COMMANDS);
-  const pages = groups.find((g) => g.category === 'pages');
-  assert.equal(pages.commands[0].id, 'nav-explorer');
-  assert.equal(pages.commands[1].id, 'nav-history');
+test('buildFunctionSubtitle: lists each param with type', () => {
+  const fn = {
+    name: 'transfer',
+    inputs: [
+      { name: 'from', type: 'address', description: 'Sender address' },
+      { name: 'to', type: 'address', description: 'Recipient address' },
+      { name: 'amount', type: 'u128' },
+    ],
+    outputs: 'bool',
+  };
+  const subtitle = buildFunctionSubtitle(fn);
+  assert.ok(subtitle.startsWith('Params:'), 'subtitle should start with Params:');
+  assert.ok(subtitle.includes('from: address'), 'should include from param');
+  assert.ok(subtitle.includes('Sender address'), 'should include description');
+  assert.ok(subtitle.includes('amount: u128'), 'should include amount param');
 });
 
-test('groupResultsByCategory: works with full buildCommandRegistry output', () => {
-  const registry = buildCommandRegistry({ functions: [{ name: 'transfer' }, { name: 'mint' }] });
-  const groups = groupResultsByCategory(registry);
-  const cats = groups.map((g) => g.category);
-  // All three categories should be present since registry has nav + functions + settings.
-  assert.ok(cats.includes('pages'));
-  assert.ok(cats.includes('functions'));
-  assert.ok(cats.includes('settings'));
+test('buildFunctionSubtitle: no-arg function returns readable string', () => {
+  const subtitle = buildFunctionSubtitle({ name: 'symbol', inputs: [], outputs: 'string' });
+  assert.equal(subtitle, 'Returns string');
+});
+
+test('buildFunctionSubtitle: no-arg no-output returns "No parameters"', () => {
+  const subtitle = buildFunctionSubtitle({ name: 'ping', inputs: [] });
+  assert.equal(subtitle, 'No parameters');
+});
+
+test('buildCommandRegistry: function title includes inline param and return hints', () => {
+  const registry = buildCommandRegistry({
+    functions: [
+      {
+        name: 'transfer',
+        inputs: [
+          { name: 'from', type: 'address' },
+          { name: 'to', type: 'address' },
+          { name: 'amount', type: 'u128' },
+        ],
+        outputs: 'bool',
+      },
+    ],
+  });
+  const cmd = registry.find((c) => c.id === 'fn-transfer');
+  assert.ok(cmd, 'transfer command should be in registry');
+  assert.ok(
+    cmd.title.includes('from: address'),
+    `title should contain param hint, got: ${cmd.title}`,
+  );
+  assert.ok(
+    cmd.title.includes('→ bool'),
+    `title should contain return type hint, got: ${cmd.title}`,
+  );
+});
+
+test('buildCommandRegistry: function keywords include param names and types for searching', () => {
+  const registry = buildCommandRegistry({
+    functions: [
+      {
+        name: 'transfer',
+        inputs: [{ name: 'from', type: 'address' }, { name: 'amount', type: 'u128' }],
+      },
+    ],
+  });
+  const cmd = registry.find((c) => c.id === 'fn-transfer');
+  assert.ok(cmd.keywords.includes('from'), 'keywords should include param name "from"');
+  assert.ok(cmd.keywords.includes('address'), 'keywords should include param type "address"');
+  assert.ok(cmd.keywords.includes('amount'), 'keywords should include param name "amount"');
+  assert.ok(cmd.keywords.includes('u128'), 'keywords should include param type "u128"');
+});
+
+test('filterCommands: searching by param type surfaces matching functions', () => {
+  const registry = buildCommandRegistry({
+    functions: [
+      { name: 'transfer', inputs: [{ name: 'from', type: 'address' }, { name: 'amount', type: 'u128' }] },
+      { name: 'symbol', inputs: [] },
+    ],
+  });
+  const results = filterCommands(registry, 'u128');
+  assert.ok(results.some((c) => c.id === 'fn-transfer'), 'transfer should match "u128" search');
+  assert.ok(!results.some((c) => c.id === 'fn-symbol'), 'symbol should NOT match "u128" search');
+});
+
+test('filterCommands: searching by param name surfaces matching functions', () => {
+  const registry = buildCommandRegistry({
+    functions: [
+      { name: 'transfer', inputs: [{ name: 'from', type: 'address' }, { name: 'amount', type: 'u128' }] },
+      { name: 'balance', inputs: [{ name: 'account', type: 'address' }] },
+    ],
+  });
+  const results = filterCommands(registry, 'account');
+  assert.ok(results.some((c) => c.id === 'fn-balance'), 'balance should match "account" search');
+  assert.ok(!results.some((c) => c.id === 'fn-transfer'), 'transfer should NOT match "account" search');
 });

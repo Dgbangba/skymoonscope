@@ -215,81 +215,78 @@ function filterCommands(commands, query, options = {}) {
 }
 
 /**
- * Maps the internal `group` string on a command to one of the three public
- * display categories shown in the search results panel.
+ * Build a human-readable parameter hint string from a contract function's
+ * input list, e.g. `(from: address, to: address, amount: u128)`.
  *
- * - 'pages'     — navigable destinations (Explorer, History, Transactions, Schema)
- * - 'settings'  — configuration destinations (Settings / Preferences)
- * - 'functions' — callable contract functions
+ * Falls back gracefully when `inputs` is absent or empty.
  *
- * Any group that does not match a known bucket falls back to 'pages' so
- * future additions remain visible without requiring a schema change here.
- *
- * @param {string} group
- * @returns {'pages' | 'settings' | 'functions'}
+ * @param {Array<{name: string, type: string, optional?: boolean}>} inputs
+ * @returns {string}
  */
-function categoryForGroup(group) {
-  if (group === 'Contract functions') return 'functions';
-  if (group === 'Preferences') return 'settings';
-  return 'pages';
-}
-
-/**
- * Group a flat ordered list of search results into display categories.
- *
- * Results preserve their original sort order within each category. Categories
- * appear in the fixed display order: pages → functions → settings. Empty
- * categories are omitted so the UI never renders a header with no rows.
- *
- * @param {import('./searchCommands').SearchCommand[]} results
- * @returns {Array<{ category: 'pages'|'functions'|'settings', label: string, commands: import('./searchCommands').SearchCommand[] }>}
- */
-function groupResultsByCategory(results) {
-  /** @type {Record<string, string>} map category key → human-readable label */
-  const LABELS = {
-    pages: 'Pages',
-    functions: 'Functions',
-    settings: 'Settings',
-  };
-
-  /** Fixed order categories appear in, regardless of which matched */
-  const CATEGORY_ORDER = /** @type {const} */ (['pages', 'functions', 'settings']);
-
-  /** @type {Record<string, import('./searchCommands').SearchCommand[]>} */
-  const buckets = { pages: [], functions: [], settings: [] };
-
-  const list = Array.isArray(results) ? results : [];
-  for (const command of list) {
-    const cat = categoryForGroup(command.group ?? '');
-    buckets[cat].push(command);
-  }
-
-  return CATEGORY_ORDER
-    .filter((cat) => buckets[cat].length > 0)
-    .map((cat) => ({ category: cat, label: LABELS[cat], commands: buckets[cat] }));
+function buildParamHint(inputs) {
+  if (!Array.isArray(inputs) || inputs.length === 0) return '()';
+  const parts = inputs.map((input) => {
+    const name = String(input.name ?? '');
+    const type = String(input.type ?? '');
+    const suffix = input.optional ? '?' : '';
+    return `${name}${suffix}: ${type}`;
+  });
+  return `(${parts.join(', ')})`;
 }
 
 /**
  * Build the searchable command list, optionally extended with contextual
  * entries such as the current contract's functions.
  *
- * @param {{ functions?: Array<{name: string}>, extra?: Array<object> }} [context]
+ * Contract function commands include a parameter type-hint subtitle and extra
+ * keywords derived from parameter names and types so users can search for
+ * e.g. "address" or "u128" to surface relevant functions.
+ *
+ * @param {{ functions?: Array<{name: string, inputs?: Array<{name:string,type:string,optional?:boolean}>, outputs?: string}>, extra?: Array<object> }} [context]
  */
 function buildCommandRegistry(context = {}) {
   const functionCommands = (Array.isArray(context.functions) ? context.functions : []).map(
-    (fn) => ({
-      id: `fn-${fn.name}`,
-      title: fn.name,
-      subtitle: 'Select this contract function',
-      group: 'Contract functions',
-      action: 'select-function',
-      payload: { name: fn.name },
-      keywords: ['function', 'invoke', 'call'],
-    }),
+    (fn) => {
+      const paramHint = buildParamHint(fn.inputs);
+      const outputHint = fn.outputs ? ` → ${fn.outputs}` : '';
+      const paramKeywords = Array.isArray(fn.inputs)
+        ? fn.inputs.flatMap((input) => [input.name, input.type].filter(Boolean))
+        : [];
+
+      return {
+        id: `fn-${fn.name}`,
+        title: `${fn.name}${paramHint}${outputHint}`,
+        subtitle: buildFunctionSubtitle(fn),
+        group: 'Contract functions',
+        action: 'select-function',
+        payload: { name: fn.name },
+        keywords: ['function', 'invoke', 'call', ...paramKeywords],
+      };
+    },
   );
 
   const extra = Array.isArray(context.extra) ? context.extra : [];
   return [...BASE_COMMANDS, ...functionCommands, ...extra];
+}
+
+/**
+ * Build a subtitle for a contract function that describes its parameters.
+ *
+ * @param {{ inputs?: Array<{name: string, type: string, description?: string, optional?: boolean}>, outputs?: string }} fn
+ * @returns {string}
+ */
+function buildFunctionSubtitle(fn) {
+  if (!Array.isArray(fn.inputs) || fn.inputs.length === 0) {
+    return fn.outputs ? `Returns ${fn.outputs}` : 'No parameters';
+  }
+  const paramList = fn.inputs
+    .map((input) => {
+      const optional = input.optional ? ' (optional)' : '';
+      const description = input.description ? ` — ${input.description}` : '';
+      return `${input.name}: ${input.type}${optional}${description}`;
+    })
+    .join(', ');
+  return `Params: ${paramList}`;
 }
 
 /** Wrap-around cursor movement for arrow-key navigation. */
@@ -347,6 +344,8 @@ module.exports = {
   scoreCommand,
   filterCommands,
   buildCommandRegistry,
+  buildParamHint,
+  buildFunctionSubtitle,
   moveHighlight,
   moveHighlightTo,
   normalizeHighlight,
