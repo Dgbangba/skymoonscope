@@ -18,6 +18,7 @@ mod jobs;
 mod leader_lock;
 mod merkle_tree;
 mod parser;
+mod profiling_webhooks;
 mod routing;
 pub mod rpc_provider;
 mod rpc_throttle;
@@ -888,6 +889,12 @@ pub struct ProfileWasmRequest {
     /// Optional function arguments.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Optional webhook configuration for profiling result notification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook: Option<crate::profiling_webhooks::ProfileWebhookConfig>,
+    /// Optional request ID for correlation with webhook delivery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 /// Response body for the WASM profiling endpoint.
@@ -1336,12 +1343,15 @@ async fn metrics_handler(
 
 async fn analyze_wasm_profile(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<ProfileWasmRequest>,
+    Json(mut payload): Json<ProfileWasmRequest>,
 ) -> Result<Json<ProfileResponse>, AppError> {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
+    let request_id = payload.request_id.clone();
+
     tracing::info!(
         function_name = %payload.function_name,
+        request_id = ?request_id,
         "Received WASM profile request"
     );
 
@@ -1379,8 +1389,42 @@ async fn analyze_wasm_profile(
     .map_err(|e| AppError::BadRequest(format!("Profiling failed: {}", e)))?;
 
     let (resources, profile) = result;
+    let response = ProfileResponse { profile, resources };
 
-    Ok(Json(ProfileResponse { profile, resources }))
+    // Deliver webhook asynchronously if configured.
+    if let Some(webhook_config) = payload.webhook.take() {
+        let profile_result = serde_json::to_value(&response.profile)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let webhook_payload = crate::profiling_webhooks::ProfilingWebhookPayload {
+            request_id,
+            function_name: payload.function_name.clone(),
+            result: profile_result,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let client = state.http_client.clone();
+        tokio::spawn(async move {
+            match crate::profiling_webhooks::deliver_profiling_webhook(&client, &webhook_config, webhook_payload).await {
+                Ok(_) => {
+                    tracing::info!(
+                        function_name = %payload.function_name,
+                        request_id = ?request_id,
+                        "Profiling webhook delivered successfully"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        function_name = %payload.function_name,
+                        request_id = ?request_id,
+                        error = %e,
+                        "Failed to deliver profiling webhook"
+                    );
+                }
+            }
+        });
+    }
+
+    Ok(Json(response))
 }
 
 // ── WASM branch analysis handler (Issue #101) ─────────────────────────────────
