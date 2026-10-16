@@ -153,3 +153,58 @@ happy path.
 `{ valid: false, errors: [...] }`, which is what crosses the message channel.
 Beyond magic number and version it walks every top-level section and decodes the
 export table, which is what `extractContractFunctions()` surfaces in the UI.
+
+---
+
+## 5. Keyboard navigation for interactive components
+
+Full keyboard support across the dashboard's interactive widgets, so power users
+and screen-reader users can drive every control without a mouse.
+
+| Component | Keys added |
+| --- | --- |
+| `components/ResourceHeatmap.tsx` | Tab bar: `←` / `→` (move between tabs), `Home` / `End` (jump to first / last). ARIA: `role=tablist`, `role=tab`, `aria-selected`, roving `tabIndex`. |
+| `components/FunctionSidebar.tsx` | Function list: `↑` / `↓` (move selection), `Home` / `End` (jump to first / last), `Enter` / `Space` (confirm selection). ARIA: `role=listbox` / `role=option`, `aria-selected`, roving `tabIndex`. |
+| `components/NetworkSwitcher.tsx` | Network list: `↑` / `↓` (move focus), `Home` / `End` (jump), `Enter` / `Space` (select & close), `Escape` (close & return focus to trigger). ARIA: roving `tabIndex`, `focus:` styles on unselected options. |
+| `components/GlobalSearchModal.tsx` | Already fully keyboard-accessible (`↑` / `↓`, `Enter`, `Escape`, `Cmd+K` / `Ctrl+K`) — no changes needed. |
+| `components/NutritionLabel.tsx` | Gas breakdown toggle is a native `<button>` with `aria-expanded` / `aria-controls` — no changes needed. |
+| `components/StakingCalculator.tsx` | All compound-frequency pills and preset buttons are native `<button>` elements — keyboard-accessible by default. |
+
+**Roving tabIndex pattern**: only the currently active / selected item has
+`tabIndex={0}`; all others have `tabIndex={-1}`. Arrow keys move focus
+programmatically via `element.focus()`, so a single Tab press moves in/out of
+the widget rather than cycling through every option.
+
+Tests live in `components/keyboard-nav.test.cjs` and run with
+`node --test components/keyboard-nav.test.cjs` (no build needed).
+
+---
+
+## 6. Heatmap color scale reset between contract loads
+
+**Problem**: when a second contract was profiled without reloading the page,
+hover highlights and the active tab from the first contract persisted on the new
+data, giving incorrect visual cues (e.g. a cell from contract A would remain
+"hovered" while displaying contract B's numbers).
+
+**Fix** (`components/ResourceHeatmap.tsx`): a `useEffect` watches all five
+primitive fields of the `resourceCost` prop
+(`cpu_instructions`, `ram_bytes`, `ledger_read_bytes`, `ledger_write_bytes`,
+`transaction_size_bytes`). When any of them changes — which always happens when
+a new simulation result arrives — it resets:
+
+- `activeTab` → `'gauges'` (the default overview)
+- `hoveredCellId`, `hoveredRamId`, `hoveredSegmentId`, `hoveredKey` → `null`
+
+The `useMemo` hooks that build the cell and segment arrays already recompute on
+these same props, so after the reset the UI is fully consistent with the new
+contract's data.
+
+State that belongs only to the user's current interaction (hovering over a cell)
+is ephemeral and tied to a specific contract, so clearing it on every new load
+is the correct behaviour — users can simply re-hover when they want details on
+the new contract.
+
+Tests for this fix are included in `components/keyboard-nav.test.cjs` under the
+`Heatmap: …` suite (8 scenarios covering each prop trigger and the no-change
+case).

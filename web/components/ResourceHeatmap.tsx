@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Cpu, Database, Zap, Activity, Info, Sliders, Flame, AlertTriangle, MemoryStick } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { CallGraph, CallNode } from '../lib/sorobantypes';
@@ -301,6 +301,26 @@ export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProp
   const [hoveredRamId,      setHoveredRamId]      = useState<string | null>(null);
   const [hoveredSegmentId,  setHoveredSegmentId]  = useState<string | null>(null);
   const [hoveredKey,        setHoveredKey]         = useState<string | null>(null);
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  // ── Reset all transient state when a new contract load arrives ────────────
+  // The resourceCost object is re-created on each simulation result, so any
+  // change to its primitive members means a completely new contract was loaded.
+  // Without this reset, hovered cell highlights and colour-scale selections
+  // from the previous contract persist incorrectly on the new data.
+  useEffect(() => {
+    setActiveTab('gauges');
+    setHoveredCellId(null);
+    setHoveredRamId(null);
+    setHoveredSegmentId(null);
+    setHoveredKey(null);
+  }, [
+    resourceCost.cpu_instructions,
+    resourceCost.ram_bytes,
+    resourceCost.ledger_read_bytes,
+    resourceCost.ledger_write_bytes,
+    resourceCost.transaction_size_bytes,
+  ]);
 
   const {
     cpu_instructions,
@@ -451,10 +471,43 @@ export function ResourceHeatmap({ resourceCost, callGraph }: ResourceHeatmapProp
           </div>
         </div>
 
-        <div className="flex bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/80 self-start md:self-auto shadow-inner">
+        <div
+          ref={tabListRef}
+          role="tablist"
+          aria-label="Resource analytics tabs"
+          className="flex bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/80 self-start md:self-auto shadow-inner"
+          onKeyDown={(e) => {
+            const tabKeys: Tab[] = tabs.map(t => t.key);
+            const currentIdx = tabKeys.indexOf(activeTab);
+            if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              const nextIdx = (currentIdx + 1) % tabKeys.length;
+              setActiveTab(tabKeys[nextIdx]);
+              (tabListRef.current?.children[nextIdx] as HTMLElement)?.focus();
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const prevIdx = (currentIdx - 1 + tabKeys.length) % tabKeys.length;
+              setActiveTab(tabKeys[prevIdx]);
+              (tabListRef.current?.children[prevIdx] as HTMLElement)?.focus();
+            } else if (e.key === 'Home') {
+              e.preventDefault();
+              setActiveTab(tabKeys[0]);
+              (tabListRef.current?.children[0] as HTMLElement)?.focus();
+            } else if (e.key === 'End') {
+              e.preventDefault();
+              setActiveTab(tabKeys[tabKeys.length - 1]);
+              (tabListRef.current?.children[tabKeys.length - 1] as HTMLElement)?.focus();
+            }
+          }}
+        >
           {tabs.map(tab => (
             <button
               key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              aria-controls={`heatmap-panel-${tab.key}`}
+              id={`heatmap-tab-${tab.key}`}
+              tabIndex={activeTab === tab.key ? 0 : -1}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
                 'px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5',
