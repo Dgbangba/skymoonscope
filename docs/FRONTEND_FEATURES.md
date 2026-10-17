@@ -377,3 +377,31 @@ Soroban Rust SDK (`soroban-sdk`):
 - **Section summary panel**: `components/WasmSectionSummary.tsx` displays a **Soroban Spec** tab whenever Soroban custom sections are detected in the uploaded WASM.
 - **Backend decoder**: `core/src/soroban_meta_decoder.rs` provides the Rust counterpart using `soroban-sdk`'s native XDR reader.
 
+---
+
+## 7. Heatmap virtualization and performance optimization (issue #383)
+
+For contracts with large call graphs or high function counts (>500 cells), the
+resource heatmap virtualizes row rendering to eliminate DOM layout thrashing and
+re-render lag.
+
+| File | Role |
+| --- | --- |
+| `lib/heatmapVirtualizer.js` / `.d.ts` | Row windowing and severity band calculation |
+| `components/ResourceHeatmap.tsx` | Virtualized grid rendering, memoized cell inspection |
+| `components/heatmap/HeatmapCell.tsx` | Pure memoized cell component avoiding repeated `twMerge` calls |
+| `components/heatmap/HeatmapTooltip.tsx` | Modular inspector panel component |
+| `lib/heatmapVirtualizer.test.cjs` | Unit and benchmark tests for window calculation |
+| `components/ResourceHeatmap.test.cjs` | Unit tests for call graph processing and SVG generation with 500+ cells |
+
+### Features
+
+- **Row-based virtual windowing**: When cell counts exceed 24 and the grid height
+  exceeds viewport boundaries, `computeVisibleRange` calculates start/end row
+  indices with top/bottom buffer rows and spacer heights. The number of mounted
+  DOM cells remains bounded (~36–44 cells) even for 10,000+ items.
+- **Memoized cell rendering**: `HeatmapCell` prevents full-grid re-renders on
+  hover events. Class concatenation is pre-computed to eliminate expensive
+  runtime class merge recalculations across hundreds of cells.
+- **Full call-graph preservation**: Removed arbitrary slice limits so call
+  graphs exceeding 12 or 500 nodes retain all data.
