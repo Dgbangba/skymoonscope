@@ -47,9 +47,13 @@ Flow measures real DOM nodes.
 
 ---
 
-## 2. Global search shortcut (issue #623)
+## 2. Global search shortcut (issues #623, #396)
 
-`Cmd+K` / `Ctrl+K` opens a quick-search overlay from anywhere in the app.
+The search overlay opens with a platform-aware keyboard shortcut:
+
+- **macOS**: `Ctrl+K` — Cmd+K is reserved by macOS browsers for tab/search, so
+  the overlay listens for Ctrl+K only to avoid the conflict.
+- **Windows / Linux**: `Ctrl+K` or `Cmd+K` (the Windows key) both open it.
 
 | File | Role |
 | --- | --- |
@@ -58,6 +62,13 @@ Flow measures real DOM nodes.
 | `components/GlobalSearchModal.tsx` | The overlay; mounted once in `pages/_app.tsx` |
 | `lib/searchCommands.test.cjs` | Unit tests for matching, keyboard navigation, and parameter hints |
 | `lib/searchHistory.test.cjs` | Unit tests for history push/dedup/remove/clear |
+
+Shortcut detection lives in `isSearchShortcut(event, { isMac })` in
+`lib/searchCommands.js`. It uses `defaultIsMac()` (navigator.platform /
+navigator.userAgent) at runtime; tests pass an explicit `isMac` boolean to drive
+both branches deterministically. The header search button shows the
+platform-appropriate hint (`⌃K` on macOS, `Ctrl K` elsewhere) resolved after
+mount to avoid SSR hydration mismatches.
 
 The listener sits on `window` so the shortcut fires regardless of focus.
 `Escape`, the backdrop and the close button all dismiss it; `↑`/`↓` move the
@@ -195,187 +206,56 @@ happy path.
 Beyond magic number and version it walks every top-level section and decodes the
 export table, which is what `extractContractFunctions()` surfaces in the UI.
 
-### Fix: worker crash on custom name sections (issue #409)
+---
 
-Soroban contracts compiled with debug info include a WASM custom section (id=0)
-with the name string `"name"` and function-name subsection data. These are
-larger, more realistic modules that triggered a latent boot-time crash in the
-worker.
+## 5. Keyboard navigation for interactive components
 
-**Root cause.** `wasmWorker.js` originally contained this at the top level,
-outside `onmessage`:
+Full keyboard support across the dashboard's interactive widgets, so power users
+and screen-reader users can drive every control without a mouse.
 
-```js
-const { validateWasmModule } = self.SkyMoonScopeWasmValidation;
-```
+| Component | Keys added |
+| --- | --- |
+| `components/ResourceHeatmap.tsx` | Tab bar: `←` / `→` (move between tabs), `Home` / `End` (jump to first / last). ARIA: `role=tablist`, `role=tab`, `aria-selected`, roving `tabIndex`. |
+| `components/FunctionSidebar.tsx` | Function list: `↑` / `↓` (move selection), `Home` / `End` (jump to first / last), `Enter` / `Space` (confirm selection). ARIA: `role=listbox` / `role=option`, `aria-selected`, roving `tabIndex`. |
+| `components/NetworkSwitcher.tsx` | Network list: `↑` / `↓` (move focus), `Home` / `End` (jump), `Enter` / `Space` (select & close), `Escape` (close & return focus to trigger). ARIA: roving `tabIndex`, `focus:` styles on unselected options. |
+| `components/GlobalSearchModal.tsx` | Already fully keyboard-accessible (`↑` / `↓`, `Enter`, `Escape`, `Ctrl+K` / `Cmd+K`) — no changes needed. |
+| `components/NutritionLabel.tsx` | Gas breakdown toggle is a native `<button>` with `aria-expanded` / `aria-controls` — no changes needed. |
+| `components/StakingCalculator.tsx` | All compound-frequency pills and preset buttons are native `<button>` elements — keyboard-accessible by default. |
 
-`importScripts('/wasm/wasmValidation.js')` runs synchronously just before this
-line and normally succeeds, populating `self.SkyMoonScopeWasmValidation`. But if
-`importScripts` ever failed — 404, CSP header, network hiccup in the worker
-scope — the destructure threw a `TypeError` at boot time, before `onmessage` was
-registered. The ping handshake in `useWasmValidationWorker` therefore never
-received a `pong`, the 2s timeout fired, and the hook silently fell back to the
-main thread. Uploads still worked but the off-thread benefit was lost and any
-future call with the dead worker would hang until fallback triggered again.
+**Roving tabIndex pattern**: only the currently active / selected item has
+`tabIndex={0}`; all others have `tabIndex={-1}`. Arrow keys move focus
+programmatically via `element.focus()`, so a single Tab press moves in/out of
+the widget rather than cycling through every option.
 
-**Fix.** The destructure (now `const api = self.SkyMoonScopeWasmValidation`) was
-moved inside `onmessage`, after the ping fast-path. The import is still attempted
-at boot so the happy path is unchanged; only `validate` calls need the API
-object. If it is absent they receive an `{ type: 'error', message: '...' }` reply
-rather than the worker dying silently.
-
-**Test fix.** `lib/wasmWorker.test.cjs` previously pre-populated
-`sandbox.SoroscopeWasmValidation` (wrong global name) and used a no-op
-`importScripts`. The sandbox now implements `importScripts` by running the
-requested script file through `vm.runInContext`, exactly mirroring the real
-worker boot sequence. Six regression tests were added covering the name-section
-scenario, non-ASCII function names in the name section, and the importScripts-
-failure graceful-error path.
+Tests live in `components/keyboard-nav.test.cjs` and run with
+`node --test components/keyboard-nav.test.cjs` (no build needed).
 
 ---
 
-## 6. Voice input for global search (issue #394)
+## 6. Heatmap color scale reset between contract loads
 
-The `Cmd+K` / `Ctrl+K` search overlay supports microphone input via the browser's
-Web Speech API, letting users speak a query instead of typing it.
+**Problem**: when a second contract was profiled without reloading the page,
+hover highlights and the active tab from the first contract persisted on the new
+data, giving incorrect visual cues (e.g. a cell from contract A would remain
+"hovered" while displaying contract B's numbers).
 
-| File | Role |
-| --- | --- |
-| `lib/useVoiceSearch.ts` | Custom React hook; wraps `SpeechRecognition`, manages session lifecycle |
-| `components/GlobalSearchModal.tsx` | Wires the hook; renders mic button, pulsing indicator, inline error hint |
-| `lib/__tests__/useVoiceSearch.test.js` | State-machine unit tests (no React renderer needed) |
+**Fix** (`components/ResourceHeatmap.tsx`): a `useEffect` watches all five
+primitive fields of the `resourceCost` prop
+(`cpu_instructions`, `ram_bytes`, `ledger_read_bytes`, `ledger_write_bytes`,
+`transaction_size_bytes`). When any of them changes — which always happens when
+a new simulation result arrives — it resets:
 
-### How it works
+- `activeTab` → `'gauges'` (the default overview)
+- `hoveredCellId`, `hoveredRamId`, `hoveredSegmentId`, `hoveredKey` → `null`
 
-`useVoiceSearch({ onTranscript })` returns `{ supported, listening, error, start, stop }`.
+The `useMemo` hooks that build the cell and segment arrays already recompute on
+these same props, so after the reset the UI is fully consistent with the new
+contract's data.
 
-- **`supported`** — `false` in environments where `window.SpeechRecognition` and
-  `window.webkitSpeechRecognition` are both absent (Firefox stable, SSR, Node.js).
-  The mic button is hidden entirely in those cases, so the overlay is unaffected.
-- **`listening`** — flips to `true` when a session starts and back to `false` on
-  `onend` or `onerror`.
-- **`error`** — set to the Web Speech API error code (`'not-allowed'`, `'no-speech'`,
-  `'network'`, etc.) on failure. The `'aborted'` code is swallowed because it is
-  fired when the hook calls `abort()` itself and does not represent a user-visible
-  problem. Displays a one-word hint (`Mic blocked`, `No speech`, …) next to the
-  close button.
-
-### UI behaviour
-
-- A **mic button** appears to the left of the close button.
-- Clicking it starts a session; clicking again (or receiving `onend`) stops it.
-- While listening, the static search icon is replaced with a **pulsing cyan mic**
-  and the placeholder changes to `Listening…`.
-- Recognised speech is written into the query field as interim results arrive, so
-  results update in real time as the user speaks.
-- Closing the modal (Escape, backdrop click, close button) calls `stop()`, which
-  aborts any active session before unmounting.
-
-### Graceful degradation
-
-The hook accepts a `recognitionFactory` override (used by tests), and the default
-factory checks `window.SpeechRecognition ?? window.webkitSpeechRecognition` at
-call time — not at module load time — so it works correctly in SSR environments
-where `window` is undefined.
-
-### Testability
-
-Because the hook state-machine is extracted from React (the tests drive it by
-calling `startVoiceSearch` / `stopVoiceSearch` helpers with a mock recognition
-object), the tests run under `node --test` with zero browser or renderer
-dependencies. The mock fires synthetic `onresult`, `onerror`, and `onend` events
-to cover every branch.
-
-After a WASM file is decoded, a collapsible panel appears below each file card
-in the upload list, giving a structured view of the module's binary contents.
-
-| File | Role |
-| --- | --- |
-| `components/WasmSectionSummary.tsx` | Collapsible panel component with four tabs |
-| `components/WasmSectionSummary.test.cjs` | Parser extension tests and panel logic tests |
-| `public/wasm/wasmValidation.js` | Extended with `parseDataSection` and fixed `parseImportSection` |
-| `lib/wasmValidation.d.ts` | New `WasmDataSegment` interface; `dataSegments` added to `WasmValidationReport` |
-
-### Panel structure
-
-`<WasmSectionSummaryPanel report={report} />` accepts a `WasmValidationReport`
-and renders a collapsible panel (closed by default) with four tabs:
-
-| Tab | Content |
-| --- | --- |
-| **Exports** | All exported symbols — name, kind (function / table / memory / global), index |
-| **Imports** | All imported symbols — module, name, kind |
-| **Data** | Data segment index, kind (active / passive), offset, byte length |
-| **Sections** | All top-level section IDs and sizes |
-
-Warnings from the decoder (e.g. "Module exports nothing") appear in an amber
-footer strip at the bottom of the open panel.
-
-The panel is integrated into `components/WasmUpload.tsx`: it mounts below the
-file card for every file whose status is `"success"` and whose `validation`
-report is available.
-
-### Parser extensions
-
-**`parseDataSection(bytes, start, end) → WasmDataSegment[]`** (new)
-
-Parses the data section (id = 11). Each segment records its kind
-(`"active"` / `"passive"` / `"unknown(n)"`), target memory index, offset
-constant (decoded from `i32.const <imm> end`; `null` for passive or complex
-offset expressions), and the byte length of the initialiser data. The raw bytes
-are not stored to keep the JSON report small.
-
-**`parseImportSection` (bug fix)**
-
-Previously the import parser stopped at the first non-function import kind
-(table / memory / global), because it only knew how to skip the one-byte type
-index that follows a function descriptor. Each descriptor kind now has its bytes
-correctly skipped (`skipImportDescriptor`), so all imports are decoded
-regardless of kind mix.
-
-### Types
-
-```ts
-interface WasmDataSegment {
-  index: number;
-  kind: 'active' | 'passive' | string;
-  memoryIndex: number | null;
-  offsetValue: number | null;
-  byteLength: number;
-}
-
-interface WasmValidationReport {
-  // ... existing fields ...
-  dataSegments: WasmDataSegment[];
-  sorobanMeta?: SorobanMetaDecodeResult;
-}
-```
-
----
-
-## 5. Soroban metadata decoding from WASM custom sections (issue #413)
-
-Parses Soroban-specific custom sections embedded in WASM binaries by the official
-Soroban Rust SDK (`soroban-sdk`):
-
-| Section | Content | Decoded representation |
-| --- | --- | --- |
-| `contractmetav0` | Build and SDK metadata (e.g. `rssdkver`, `rsver`) | Key-value pairs (`SorobanMetaKV[]`) |
-| `contractspecv0` | Full contract ABI (functions, params, returns, types) | Functions (`SorobanSpecFunction[]`), types (`SorobanSpecType[]`) |
-
-| File | Role |
-| --- | --- |
-| `public/wasm/sorobanMeta.js` | Zero-dependency UMD decoder for `contractmetav0` & `contractspecv0` |
-| `lib/sorobanMeta.js` / `.d.ts` | App-facing entry point and TypeScript declarations |
-| `components/SorobanMetadataPanel.tsx` | Interactive UI panel displaying ABI signatures, types, and build metadata |
-| `lib/sorobanMeta.test.cjs` | Unit tests for XDR primitives, custom section search, and decoding |
-| `components/SorobanMetadataPanel.test.cjs` | Tests for metadata filtering and signature generation |
-
-### Integration
-
-- **Off-thread validation**: `public/wasm/wasmWorker.js` loads `sorobanMeta.js` and decodes metadata inside the worker.
-- **Section summary panel**: `components/WasmSectionSummary.tsx` displays a **Soroban Spec** tab whenever Soroban custom sections are detected in the uploaded WASM.
-- **Backend decoder**: `core/src/soroban_meta_decoder.rs` provides the Rust counterpart using `soroban-sdk`'s native XDR reader.
+State that belongs only to the user's current interaction (hovering over a cell)
+is ephemeral and tied to a specific contract, so clearing it on every new load
+is the correct behaviour — users can simply re-hover when they want details on
+the new contract.
 
 ---
 
@@ -405,3 +285,4 @@ re-render lag.
   runtime class merge recalculations across hundreds of cells.
 - **Full call-graph preservation**: Removed arbitrary slice limits so call
   graphs exceeding 12 or 500 nodes retain all data.
+Regression tests for this fix live in `components/ResourceHeatmap.test.cjs` and `lib/heatmapVirtualizer.test.cjs`. They cover call graphs exceeding 500 nodes, SVG export without truncation, visible-range calculations, scroll boundaries, and large-dataset windowing performance.

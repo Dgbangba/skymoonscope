@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
-import { Cpu, Database, Zap, Activity, Info, Sliders, Flame, AlertTriangle, MemoryStick, Download, Settings2, Image } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Cpu, Database, Zap, Activity, Info, Sliders, Flame, AlertTriangle, MemoryStick } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { CallGraph, CallNode } from '../lib/sorobantypes';
 import { HeatmapCell } from './heatmap/HeatmapCell';
@@ -428,114 +428,26 @@ export function ResourceHeatmap({ resourceCost, callGraph, hotspotCells: customH
   const [hoveredRamId,      setHoveredRamId]      = useState<string | null>(null);
   const [hoveredSegmentId,  setHoveredSegmentId]  = useState<string | null>(null);
   const [hoveredKey,        setHoveredKey]         = useState<string | null>(null);
-  const [zoom,              setZoom]              = useState<number>(1);
+  const tabListRef = useRef<HTMLDivElement>(null);
 
-  // ── Configurable scale breakpoints ─────────────────────────────────────────
-  const [breakpoints, setBreakpoints] = useState<ScaleBreakpoints>(DEFAULT_BREAKPOINTS);
-
-  // ── Export ref ─────────────────────────────────────────────────────────────
-  const heatmapRef = useRef<HTMLDivElement>(null);
-
-  // ── Export to PNG via html2canvas ──────────────────────────────────────────
-  const exportPng = useCallback(async () => {
-    if (!heatmapRef.current) return;
-    try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(heatmapRef.current, {
-        backgroundColor: '#0f172a',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-      const url = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'skymoonscope-heatmap.png';
-      a.click();
-    } catch (err) {
-      console.error('[ResourceHeatmap] PNG export failed:', err);
-    }
-  }, []);
-
-  // ── Export to SVG ───────────────────────────────────────────────────────────
-  // NOTE: hotspotCells is memoized below; exportSvg reads it via a stable ref.
-  const hotspotCellsRef = useRef<CpuHotspotCell[]>([]);
-
-  const exportSvg = useCallback(() => {
-    const cells = hotspotCellsRef.current;
-    const CELL_W = 120;
-    const CELL_H = 72;
-    const COLS   = 4;
-    const PAD    = 8;
-
-    const rows   = Math.ceil(cells.length / COLS);
-    const W      = COLS * (CELL_W + PAD) + PAD;
-    const H      = rows * (CELL_H + PAD) + PAD + 48; // 48px header
-
-    const svgParts: string[] = [
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
-      `<rect width="100%" height="100%" fill="#0f172a"/>`,
-      `<text x="${PAD}" y="28" font-family="monospace" font-size="13" font-weight="bold" fill="#f1f5f9">`,
-      `  Sky Moon Scope — CPU Hotspot Heatmap`,
-      `</text>`,
-    ];
-
-    cells.forEach((cell, i) => {
-      const col  = i % COLS;
-      const row  = Math.floor(i / COLS);
-      const x    = PAD + col * (CELL_W + PAD);
-      const y    = 48 + PAD + row * (CELL_H + PAD);
-      const clr  = hotspotColors(cell.cpuShare, breakpoints);
-
-      const HEX_BG: Record<string, string> = {
-        'bg-rose-500/75':   '#f43f5e44',
-        'bg-orange-500/65': '#f9731644',
-        'bg-amber-500/55':  '#eab30844',
-        'bg-cyan-700/45':   '#0e749044',
-        'bg-slate-800/65':  '#1e293b88',
-      };
-      const bgFill    = HEX_BG[clr.bg]    ?? '#1e293b88';
-      const strokeClr = clr.barHex;
-
-      svgParts.push(
-        `<rect x="${x}" y="${y}" width="${CELL_W}" height="${CELL_H}" rx="6" fill="${bgFill}" stroke="${strokeClr}" stroke-width="1"/>`,
-        `<text x="${x + 6}" y="${y + 16}" font-family="monospace" font-size="8" fill="${clr.barHex}">#${i + 1}  ${clr.label}</text>`,
-        `<text x="${x + 6}" y="${y + 32}" font-family="monospace" font-size="9" font-weight="bold" fill="#f1f5f9">${cell.displayName}</text>`,
-        `<text x="${x + 6}" y="${y + 46}" font-family="monospace" font-size="9" fill="${clr.barHex}">${cell.cpuShare.toFixed(1)}%</text>`,
-        // Mini progress bar
-        `<rect x="${x + 6}" y="${y + 54}" width="${CELL_W - 12}" height="4" rx="2" fill="#00000044"/>`,
-        `<rect x="${x + 6}" y="${y + 54}" width="${Math.min(cell.cpuShare * 4, 100) * (CELL_W - 12) / 100}" height="4" rx="2" fill="${clr.barHex}" opacity="0.85"/>`,
-      );
-    });
-
-    // Legend
-    const legendY = H - 14;
-    const legendBands = [
-      { label: `CRITICAL ≥${breakpoints.critical}%`, hex: '#f43f5e' },
-      { label: `HIGH ≥${breakpoints.high}%`,         hex: '#f97316' },
-      { label: `MEDIUM ≥${breakpoints.medium}%`,     hex: '#eab308' },
-      { label: `LOW ≥${breakpoints.low}%`,           hex: '#06b6d4' },
-      { label: `TRACE <${breakpoints.low}%`,         hex: '#475569' },
-    ];
-    legendBands.forEach((b, i) => {
-      const lx = PAD + i * 130;
-      svgParts.push(
-        `<rect x="${lx}" y="${legendY - 6}" width="10" height="10" rx="2" fill="${b.hex}"/>`,
-        `<text x="${lx + 14}" y="${legendY + 3}" font-family="monospace" font-size="8" fill="#94a3b8">${b.label}</text>`,
-      );
-    });
-
-    svgParts.push('</svg>');
-
-    const blob = new Blob([svgParts.join('\n')], { type: 'image/svg+xml' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = 'skymoonscope-heatmap.svg';
-    a.click();
-    URL.revokeObjectURL(url);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [breakpoints]);
+  // ── Reset all transient state when a new contract load arrives ────────────
+  // The resourceCost object is re-created on each simulation result, so any
+  // change to its primitive members means a completely new contract was loaded.
+  // Without this reset, hovered cell highlights and colour-scale selections
+  // from the previous contract persist incorrectly on the new data.
+  useEffect(() => {
+    setActiveTab('gauges');
+    setHoveredCellId(null);
+    setHoveredRamId(null);
+    setHoveredSegmentId(null);
+    setHoveredKey(null);
+  }, [
+    resourceCost.cpu_instructions,
+    resourceCost.ram_bytes,
+    resourceCost.ledger_read_bytes,
+    resourceCost.ledger_write_bytes,
+    resourceCost.transaction_size_bytes,
+  ]);
 
   const {
     cpu_instructions,
@@ -755,41 +667,50 @@ export function ResourceHeatmap({ resourceCost, callGraph, hotspotCells: customH
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/80 self-start md:self-auto shadow-inner">
-            {tabs.map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={cn(
-                  'px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5',
-                  activeTab === tab.key
-                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 border border-transparent',
-                )}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Export buttons */}
-          <div className="flex items-center gap-1.5 self-start md:self-auto">
+        <div
+          ref={tabListRef}
+          role="tablist"
+          aria-label="Resource analytics tabs"
+          className="flex bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/80 self-start md:self-auto shadow-inner"
+          onKeyDown={(e) => {
+            const tabKeys: Tab[] = tabs.map(t => t.key);
+            const currentIdx = tabKeys.indexOf(activeTab);
+            if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              const nextIdx = (currentIdx + 1) % tabKeys.length;
+              setActiveTab(tabKeys[nextIdx]);
+              (tabListRef.current?.children[nextIdx] as HTMLElement)?.focus();
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const prevIdx = (currentIdx - 1 + tabKeys.length) % tabKeys.length;
+              setActiveTab(tabKeys[prevIdx]);
+              (tabListRef.current?.children[prevIdx] as HTMLElement)?.focus();
+            } else if (e.key === 'Home') {
+              e.preventDefault();
+              setActiveTab(tabKeys[0]);
+              (tabListRef.current?.children[0] as HTMLElement)?.focus();
+            } else if (e.key === 'End') {
+              e.preventDefault();
+              setActiveTab(tabKeys[tabKeys.length - 1]);
+              (tabListRef.current?.children[tabKeys.length - 1] as HTMLElement)?.focus();
+            }
+          }}
+        >
+          {tabs.map(tab => (
             <button
-              onClick={exportPng}
-              data-testid="export-png-btn"
-              title="Export as PNG"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wider border border-slate-700 bg-slate-800/60 text-slate-300 hover:text-cyan-300 hover:border-cyan-600/50 transition-all duration-200"
-            >
-              <Image className="h-3 w-3" />
-              PNG
-            </button>
-            <button
-              onClick={exportSvg}
-              data-testid="export-svg-btn"
-              title="Export CPU hotspot grid as SVG"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wider border border-slate-700 bg-slate-800/60 text-slate-300 hover:text-cyan-300 hover:border-cyan-600/50 transition-all duration-200"
+              key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              aria-controls={`heatmap-panel-${tab.key}`}
+              id={`heatmap-tab-${tab.key}`}
+              tabIndex={activeTab === tab.key ? 0 : -1}
+              onClick={() => setActiveTab(tab.key)}
+              className={cn(
+                'px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all duration-300 flex items-center gap-1.5',
+                activeTab === tab.key
+                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent',
+              )}
             >
               <Download className="h-3 w-3" />
               SVG
