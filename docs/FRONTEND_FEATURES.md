@@ -286,3 +286,80 @@ re-render lag.
 - **Full call-graph preservation**: Removed arbitrary slice limits so call
   graphs exceeding 12 or 500 nodes retain all data.
 Regression tests for this fix live in `components/ResourceHeatmap.test.cjs` and `lib/heatmapVirtualizer.test.cjs`. They cover call graphs exceeding 500 nodes, SVG export without truncation, visible-range calculations, scroll boundaries, and large-dataset windowing performance.
+Tests for this fix are included in `components/keyboard-nav.test.cjs` under the
+`Heatmap: …` suite (8 scenarios covering each prop trigger and the no-change
+case).
+
+---
+
+## 7. Milestone schedule table CSV export
+
+Export the full monthly milestone compounding schedule as an RFC 4180-compliant CSV.
+
+| File | Role |
+| --- | --- |
+| `lib/stakingCalculator.js` / `.d.ts` | Pure formatting function (`formatMilestoneScheduleCSV`) and browser download trigger (`exportMilestoneScheduleCSV`) |
+| `components/StakingCalculator.tsx` | Export CSV buttons in the table header and schedule toggle bar with temporary visual feedback |
+| `lib/stakingCalculator.test.cjs` | Unit tests for RFC 4180 compliance, sanitization, and formatting options |
+| `components/StakingCalculator.test.cjs` | Integration tests verifying full-schedule export (up to 36 months) and simulated DOM download |
+
+**Where to find it:** In the **Token Yield & Staking Calculator** widget, either click the **Export CSV** button next to "View Monthly Milestone Schedule" or expand the table and click **Export CSV** in the schedule table header.
+
+---
+
+## 8. Staking scenario comparison (up to 3 configurations)
+
+Compare up to 3 staking configurations side-by-side to evaluate differences in lock duration tiers, deposit amounts, compound frequencies, and APY returns.
+
+| File | Role |
+| --- | --- |
+| `lib/stakingCalculator.js` / `.d.ts` | Multi-scenario evaluation engine (`compareStakingScenarios`), default presets (`DEFAULT_STAKING_SCENARIOS`), and comparison CSV exporter (`formatScenarioComparisonCSV`) |
+| `components/StakingCalculator.tsx` | Scenario comparison panel with side-by-side cards, winner badges (Top Yield, Top APY, Top ROI), baseline delta metrics, scenario application, and CSV export |
+| `lib/stakingCalculator.test.cjs` | Unit tests for scenario comparison rankings, capping at 3, delta computations, and CSV serialization |
+| `components/StakingCalculator.test.cjs` | Integration tests verifying multi-scenario evaluation and simulated browser download |
+
+**Features:**
+- **Side-by-Side Comparison**: Evaluates up to 3 scenarios simultaneously with full metrics (total balance, rewards, effective APY, ROI %, monthly & daily yields).
+- **Winner Badges**: Dynamically flags top-performing configurations with badges for `Top Yield`, `Top APY`, and `Top ROI`.
+- **Baseline Variance**: Compares each scenario against a selected baseline (defaulting to Scenario #1) to highlight rewards and APY deltas.
+- **Interactive Management**: Save the current calculator state as a scenario, apply any scenario's settings directly into the calculator inputs, remove scenarios, or restore the default presets (`Conservative`, `Balanced`, `Aggressive`).
+- **CSV Export**: Export the side-by-side metric comparison matrix directly to CSV.
+
+---
+
+## 9. Inflation adjustment (real vs. nominal return display)
+
+Toggle between nominal returns and real (inflation-adjusted) returns using the exact Fisher equation and purchasing power discounting.
+
+| File | Role |
+| --- | --- |
+| `lib/stakingCalculator.js` / `.d.ts` | Mathematical engine for real purchasing power discounting (`Real Balance = Nominal Balance / (1 + i)^t`), real APY (`((1 + r_nom)/(1 + i) - 1) * 100`), negative real return detection, and per-month real breakdowns |
+| `components/StakingCalculator.tsx` | Interactive toggle switch (`Nominal Returns` vs. `Real Returns`), inflation rate slider & preset buttons (2%, 3%, 5%, 8%), negative real return warning banners, and real vs. nominal card subtitles |
+| `lib/stakingCalculator.test.cjs` | Unit tests for Fisher relation math, negative real yield detection, 0% inflation equivalence, and real/nominal milestone breakdowns |
+| `components/StakingCalculator.test.cjs` | Integration tests verifying real vs nominal return toggle and scenario comparison with inflation applied |
+
+**Features:**
+- **Fisher Relation Math**: Correctly adjusts returns using $1 + r_{\text{real}} = \frac{1 + r_{\text{nominal}}}{1 + i}$ and discounts projected balances by $(1 + i)^t$.
+- **Dynamic Real vs Nominal Toggle**: Instantly switches between nominal amounts and purchasing power across all cards, effective APY, and milestone tables.
+- **Inflation Rate Configurator**: Slider (0% to 15%) and quick presets (`2.0% Target`, `3.0% Standard`, `5.0% High`, `8.0% Elevated`).
+- **Negative Return Warning**: Surfaces an alert banner when inflation exceeds staking APY, informing users that real purchasing power is decaying.
+
+---
+
+## 10. APY calculation numerical stability & high compound frequency precision
+
+Fixes floating-point precision loss and rounding error at high compounding frequencies (daily, hourly, minutely, secondly, and continuous compounding).
+
+| File | Role |
+| --- | --- |
+| `lib/stakingCalculator.js` / `.d.ts` | High-precision numerical engine (`computeCompoundYieldRate`, `calculateCompoundedApy`, `getCompoundFrequencyPeriods`) using `Math.expm1` and `Math.log1p`, plus continuous compounding limit ($e^{rt} - 1$) and synchronization of monthly milestone schedules |
+| `components/StakingCalculator.tsx` | Expanded compound frequency options (including `Continuous`), plus display of true compounded APY alongside nominal/real APY |
+| `lib/stakingCalculator.test.cjs` | Mathematical tests verifying strict monotonic increase across compound frequencies, IEEE 754 precision preservation without catastrophic cancellation, and exact milestone synchronization |
+| `components/StakingCalculator.test.cjs` | Integration tests verifying daily vs continuous compounding returns and zero sub-cent drift |
+
+**Key Enhancements:**
+- **Numerical Stability via `Math.expm1` & `Math.log1p`**: Replaced standard $(1 + r/n)^{nt} - 1$ evaluation with $\operatorname{expm1}(nt \cdot \operatorname{log1p}(r/n))$. Standard 64-bit IEEE 754 floats truncate the lowest 11 to 24 bits of mantissa precision when adding tiny terms $r/n \ll 1$ to 1, causing compounding drift. `Math.log1p` and `Math.expm1` retain full 53-bit accuracy.
+- **Continuous Compounding Limit ($n \to \infty$)**: Evaluates $\lim_{n \to \infty} (1 + r/n)^{nt} - 1 = e^{rt} - 1$ directly via `Math.expm1(r * t)`, guaranteeing an upper bound that cannot overflow or jitter.
+- **Compounded APY Metric**: Calculates and exposes `compoundedApyPercent` = $((1 + r/n)^n - 1) \times 100$, displaying the true annual compounding yield in the Effective APY card.
+- **Milestone Schedule Synchronization**: Guarantees the final milestone row at month $m = \text{months}$ matches `totalBalance` and `totalInterest` to the exact cent without rounding drift.
+
